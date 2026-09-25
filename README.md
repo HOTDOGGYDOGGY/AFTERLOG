@@ -1,6 +1,6 @@
 # AFTERLOG · 애프터로그
 
-**바로 쓰기:** https://hotdoggydoggy.github.io/afterlog/
+**바로 쓰기:** https://hotdoggydoggy.github.io/AFTERLOG/
 
 역극(RP) 기록을 원문과 함께 보관하고, 인물·이미지·표시 형식을 고쳐 다시 보거나 파일로 내보내는 도구.
 지금은 **밴드 게시글+댓글**을 지원합니다. 지원 범위는 [docs/support.md](docs/support.md)를 보세요.
