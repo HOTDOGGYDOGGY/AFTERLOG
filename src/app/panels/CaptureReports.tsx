@@ -15,6 +15,14 @@ export function CaptureReports({ reports }: { reports: unknown[] }) {
           <p className="small">
             <b>{OUTCOME[r.outcome]}</b> · 수집기 v{r.collectorVersion} · {new Date(r.exportedAt).toLocaleString()}
           </p>
+          {r.totals ? (
+            <p className="small">
+              저장한 글 <b>{r.totals.posts.toLocaleString()}</b>개 · 댓글 <b>{r.totals.comments.toLocaleString()}</b>개
+              {r.totals.commentsShown > r.totals.comments ? ` (밴드 표시 ${r.totals.commentsShown.toLocaleString()}개)` : ""}
+              {r.totals.memberComments ? ` · 인물 댓글 모음 ${r.totals.memberComments.toLocaleString()}개` : ""}
+            </p>
+          ) : null}
+          {r.selection ? <p className="small muted">선택: {r.selection.summary}</p> : null}
           <ul className="small plain-list">
             {r.lists.map((l, i) => (
               <li key={i}>

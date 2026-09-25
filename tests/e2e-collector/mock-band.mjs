@@ -17,7 +17,10 @@ function postCard(n) {
   html = html.replace("첫 줄 대사.", `${n}번 글의 첫 줄 대사.`);
   html = html.replace('href="https://band.us/band/1/post/1"', `href="http://localhost:4588/band/${BAND}/post/${n}"`);
   html = html.replace("2026년 3월 1일 오후 11:50", `2026년 3월 ${(n % 28) + 1}일 오후 11:50`);
-  html = html.replace('<span class="count">10</span>', `<span class="count">${n === 7 ? 14 : 8}</span>`);
+  // 7번 글: 표시 14개 중 8개만 보이고 '이전 댓글 보기'로 6개를 더 불러온다. 9번 글: 표시 12개인데 펼칠 버튼 없음(일부 확보로 남음)
+  html = html.replace('<span class="count">10</span>', `<span class="count">${n === 7 ? 14 : n === 9 ? 12 : 8}</span>`);
+  if (n === 7)
+    html = html.replace('class="sCommentList _heightDetectAreaForComment">', 'class="sCommentList _heightDetectAreaForComment"><button type="button" class="prevComment _prevCommentBtn">이전 댓글 보기</button><a href="#" class="_btnMuteMember">이 멤버 댓글 숨기기</a>');
   if (n === 5) html = html.replace("post_photo_2.png", "broken.png");
   // 인물 선택 수집 검사용: 5의 배수 글은 작성자가 '다온'
   if (n % 5 === 0) html = html.replace(/(class="text ">\s*)가람/, "$1다온");
@@ -51,7 +54,20 @@ const band = http.createServer((req, res) => {
     if (n === 21 || n > TOTAL) return send(200, page(`<div class="deleted">삭제된 게시글입니다.</div>`));
     if (n === 13 && k === 0) return send(503, page(`<div>잠시 후 다시 시도</div>`));
     // SPA처럼 조금 늦게 그린다
-    return send(200, page(`<div id="app"></div><template id="t">${postCard(n)}</template>`, `setTimeout(()=>{document.getElementById('app').append(document.getElementById('t').content.cloneNode(true))},600)`));
+    return send(
+      200,
+      page(
+        `<div id="app"></div><template id="t">${postCard(n)}</template>`,
+        `setTimeout(()=>{document.getElementById('app').append(document.getElementById('t').content.cloneNode(true))},600);
+        window.__muted=0;
+        document.addEventListener('click',(e)=>{
+          if(e.target.closest('._btnMuteMember')){e.preventDefault();window.__muted++;document.body.dataset.muted='1';return;}
+          const b=e.target.closest('._prevCommentBtn');if(!b)return;
+          setTimeout(()=>{const leaf=[...document.querySelectorAll('.sCommentList .cComment')].find(c=>!c.querySelector('.cComment')&&c.querySelector('._commentContent'));
+            for(let i=1;i<=6;i++){const c=leaf.cloneNode(true);c.querySelector('._commentContent').textContent='펼친 댓글 '+i;leaf.parentElement.insertBefore(c,leaf);}
+            b.remove();},400)});`,
+      ),
+    );
   }
   if (url.pathname === `/band/${BAND}` || url.pathname === `/band/${BAND}/post`) {
     const items = (from, to) => Array.from({ length: to - from }, (_, i) => `<div class="feed-item" style="height:220px">${itemHtml(TOTAL - from - i)}</div>`).join("");

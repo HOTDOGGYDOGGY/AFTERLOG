@@ -76,8 +76,10 @@ const eventV = obj(
     waiting: bool,
     end: oneOf(S.END_EVIDENCE),
     attempt: int(0, 20),
+    remaining: oneOf(S.COUNT_BUCKETS),
+    candidates: oneOf(S.COUNT_BUCKETS),
   },
-  ["code", "page", "fields", "probes", "wait", "count", "size", "media", "progress", "waiting", "end", "attempt"],
+  ["code", "page", "fields", "probes", "wait", "count", "size", "media", "progress", "waiting", "end", "attempt", "remaining", "candidates"],
 );
 
 export const STRUCT_LIMITS = { maxDepth: 8, maxNodes: 150 };

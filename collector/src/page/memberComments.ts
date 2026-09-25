@@ -1,5 +1,6 @@
 // 멤버 댓글 목록(작성댓글) 화면에서 실행되는 함수들. 페이지에 주입되므로 자체 완결형으로 유지한다(바깥 변수·import 금지).
 // 실제 저장 샘플 기준 구조: [data-viewname=DBandMemberCommentListView] > a.cCommentOnly > p.comment(댓글) · p.body(원글 발췌) · p.date
+// 원글 레이어의 닫기 버튼(샘플): button.btnCloseLyPost._btnClose
 // 목록 항목에는 원글 주소가 없다(href가 목록 자신). 원글은 항목을 누르면 레이어로 열리고, 레이어의 작성자 링크에 글 번호가 있다.
 // 쓰기 동작은 하지 않는다. 누르는 곳은 항목의 원글 발췌(p.body)뿐이며, 선택용 체크박스(label·input)는 절대 누르지 않는다.
 
@@ -118,7 +119,7 @@ export async function openCommentPostInPage(opts: { seq: number; expectText: str
   // 닫기: 레이어의 닫기 버튼 → Esc → (주소가 바뀌었으면) 뒤로
   const close = async () => {
     const btn = document.querySelector(
-      `${LAYER.split(", ").map((s) => `${s} ._btnLyClose, ${s} .btnLyClose, ${s} .btnClose, ${s} button[aria-label*="닫기"]`).join(", ")}`,
+      `${LAYER.split(", ").map((s) => `${s} ._btnClose, ${s} .btnCloseLyPost, ${s} ._btnLyClose, ${s} .btnLyClose, ${s} .btnClose, ${s} button[aria-label*="닫기"]`).join(", ")}`,
     ) as HTMLElement | null;
     if (btn) btn.click();
     else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));

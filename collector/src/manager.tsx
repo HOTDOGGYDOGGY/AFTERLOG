@@ -559,13 +559,29 @@ function JobView({
       for (const p of parts) download(p.blob, p.fileName);
       setMessage({
         kind: "ok",
-        text: `.afterlog 파일 ${parts.length}개를 받았습니다(글 ${documents}개, 결과: ${report.outcome === "complete" ? "선택 범위 확인 완료" : report.outcome === "partial" ? "일부 미확보" : "끝 확인 불가"}). AFTERLOG의 '프로젝트 → 불러오기'에서 ${parts.length > 1 ? "모든 파트를 함께" : ""} 여세요.`,
+        text: `.afterlog 파일 ${parts.length}개를 받았습니다(문서 ${documents}개 · 글 ${report.posts.captured}개 · 댓글 ${report.totals?.comments ?? 0}개, 결과: ${report.outcome === "complete" ? "선택 범위 확인 완료" : report.outcome === "partial" ? "일부 미확보" : "끝 확인 불가"}). AFTERLOG의 '프로젝트 → 불러오기'에서 ${parts.length > 1 ? "모든 파트를 함께" : ""} 여세요.`,
       });
     } catch (e) {
       setMessage({ kind: "error", text: `파일 만들기 실패: ${(e as Error).message}` });
     } finally {
       setBusy(false);
     }
+  };
+
+  // 수집 합계: 이 작업 파일에 들어가는 글(결과에서 뺀 글 제외)과 그 글들의 댓글, 인물 댓글 모음
+  const kept = caps.filter((c) => !c.excluded);
+  const totalComments = kept.reduce((n, c) => n + (c.commentsFound || 0), 0);
+  const shownComments = kept.reduce((n, c) => n + Math.max(c.commentsShown ?? c.commentsFound ?? 0, c.commentsFound || 0), 0);
+  const keptObs = job.options.selection?.commentsOnly ? obs.filter((o) => o.inRange !== false).length : 0;
+
+  const retryPartial = async () => {
+    const part = posts.filter((t) => t.status === "partial");
+    await cdb().transaction("rw", cdb().tasks, async () => {
+      for (const t of part) await cdb().tasks.update(t.id, { status: "pending", attempts: 0, notBefore: 0 });
+    });
+    if (job.status === "finished") await cdb().jobs.update(job.id, { status: "paused" });
+    await onChanged();
+    onStart();
   };
 
   const retryFailed = async () => {
@@ -602,6 +618,19 @@ function JobView({
         <p className="notice">확장이 v{job.lastRunVersion}에서 v{COLLECTOR_VERSION}로 업데이트됐습니다. 이어받으면 저장된 주소부터 새 버전으로 계속하며, 이미 모은 글은 그대로 둡니다.</p>
       ) : null}
 
+      <div className="totals" aria-label="수집 합계">
+        <span>
+          저장한 글 <b>{kept.length.toLocaleString()}</b>개
+        </span>
+        <span>
+          댓글 <b>{totalComments.toLocaleString()}</b>개{shownComments > totalComments ? <small className="muted"> (밴드 표시 {shownComments.toLocaleString()}개)</small> : null}
+        </span>
+        {keptObs ? (
+          <span>
+            인물 댓글 모음 <b>{keptObs.toLocaleString()}</b>개
+          </span>
+        ) : null}
+      </div>
       <div className="stats">
         {lists.map((l) => (
           <div key={l.id} className="stat wide">
@@ -685,6 +714,11 @@ function JobView({
         <button type="button" className="ui-btn" disabled={running || !count("failed")} onClick={retryFailed}>
           실패만 다시
         </button>
+        {count("partial") ? (
+          <button type="button" className="ui-btn" disabled={running} onClick={retryPartial} title="댓글이 모자란 글을 다시 열어 '이전 댓글'을 펼쳐 봅니다">
+            댓글 모자란 글 다시 ({count("partial")})
+          </button>
+        ) : null}
         <button
           type="button"
           className="ui-btn"

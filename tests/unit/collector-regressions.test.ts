@@ -307,3 +307,82 @@ describe("실사용 진단(글 주소를 바로 연 화면에 .cPostCard 없음)
     expect(!!r && "scopeMissing" in r).toBe(false);
   });
 });
+
+describe("실사용 진단(댓글 228개 중 72개) 회귀: 접힌 댓글 펼치기", () => {
+  // 표시 댓글 10개인데 화면에는 8개. '이전 댓글 보기'를 누르면 2개가 더 온다
+  function page(no: number) {
+    return postHtml(no).replace(
+      'class="sCommentList _heightDetectAreaForComment">',
+      `class="sCommentList _heightDetectAreaForComment"><button type="button" class="prevComment _prevCommentBtn">이전 댓글 2개 보기</button>
+       <a href="#" class="_btnMuteMember">이 멤버 댓글 숨기기</a><button type="button" class="button _seeTranslationBtn">번역 보기</button>
+       <button type="button" class="moreComment" style="display:none">이전 댓글</button>`,
+    );
+  }
+  async function run(html: string, wire: (w: Window & typeof globalThis, clicked: string[]) => void) {
+    const dom = new JSDOM(html, { url: "https://band.us/band/1/post/1" });
+    const clicked: string[] = [];
+    dom.window.document.addEventListener("click", (e) => clicked.push(((e.target as Element).getAttribute("class") ?? "") + "|" + (e.target as Element).textContent?.trim()), true);
+    wire(dom.window as unknown as Window & typeof globalThis, clicked);
+    const g = globalThis as unknown as Record<string, unknown>;
+    const prev = { document: g.document, location: g.location };
+    g.document = dom.window.document;
+    g.location = dom.window.location;
+    try {
+      const r = await extractPostInPage({ timeoutMs: 2000, stableMs: 0, probes: [], expandMs: 20_000, expandWaitMs: 400 });
+      return { r, clicked, found: dom.window.document.querySelectorAll(".cComment").length };
+    } finally {
+      g.document = prev.document;
+      g.location = prev.location;
+    }
+  }
+
+  it("'이전 댓글' 버튼만 눌러 모자란 댓글을 불러오고, 숨기기·번역·숨은 버튼은 누르지 않는다", async () => {
+    const { r, clicked } = await run(page(1), (w) => {
+      const btn = w.document.querySelector("._prevCommentBtn")!;
+      btn.addEventListener("click", () =>
+        setTimeout(() => {
+          const list = w.document.querySelector(".sCommentList")!;
+          const first = Array.from(list.querySelectorAll(".cComment")).find((c) => !c.querySelector(".cComment") && !!c.querySelector("._commentContent"))!;
+          for (const t of ["펼친 댓글 하나", "펼친 댓글 둘"]) {
+            const c = first.cloneNode(true) as Element;
+            c.querySelector("._commentContent")!.textContent = t;
+            first.parentElement!.insertBefore(c, first);
+          }
+          btn.remove();
+        }, 50),
+      );
+    });
+    expect(r.ok).toBe(true);
+    expect(clicked).toEqual(["prevComment _prevCommentBtn|이전 댓글 2개 보기"]);
+    expect(r.expandClicks).toBe(1);
+    expect(r.html).toContain("펼친 댓글 둘");
+    const { parseBandHtml } = await import("../../src/importers/band/html");
+    const doc = parseBandHtml(r.html!).documents[0];
+    expect(doc.entries.filter((e) => e.kind !== "post")).toHaveLength(10);
+    expect(r.commentsShown).toBe(10);
+  });
+
+  it("눌러도 아무 변화가 없는 버튼은 한 번만 누르고 멈춘다(일부 확보로 남음)", async () => {
+    const { r, clicked } = await run(page(1), () => undefined);
+    expect(r.ok).toBe(true);
+    expect(clicked.filter((c) => c.includes("_prevCommentBtn"))).toHaveLength(1);
+    expect(r.expandClicks).toBe(1);
+  });
+
+  it("댓글이 이미 다 있으면 아무것도 누르지 않는다", async () => {
+    const full = page(1).replace('<span class="count">10</span>', '<span class="count">8</span>');
+    const { r, clicked } = await run(full, () => undefined);
+    expect(r.ok).toBe(true);
+    expect(clicked).toEqual([]);
+    expect(r.expandClicks).toBe(0);
+  });
+
+  it("댓글이 모자란(일부) 저장본은 다음 작업에서 재사용하지 않고 다시 연다", async () => {
+    const url = "https://band.us/band/1/post/1";
+    const job = await createJob({ label: "r", scope: "post-urls", bandNo: "1", options: { ...DEFAULT_OPTIONS, includeImages: false }, posts: [{ key: "band:1:post:1", url }] });
+    await new Engine({ browser: browserFor({ [url]: postHtml(1) }), ...clock() }).run(job.id);
+    expect((await cdb().tasks.where("jobId").equals(job.id).first())!.status).toBe("partial");
+    const job2 = await createJob({ label: "r2", scope: "post-urls", bandNo: "1", options: { ...DEFAULT_OPTIONS, includeImages: false }, posts: [{ key: "band:1:post:1", url }] });
+    expect((await cdb().tasks.where("jobId").equals(job2.id).first())!.status).toBe("pending");
+  });
+});

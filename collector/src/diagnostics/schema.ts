@@ -2,7 +2,8 @@
 // 여기에 선언된 키·열거값·구간만 파일에 들어갈 수 있다. 원문·이름·주소·ID·자유 문자열은 들어갈 자리가 없다.
 
 // 2: 개수 구간에 unknown 추가(C05), scopeMissing 오류 코드 추가(C04)
-export const DIAG_SCHEMA_VERSION = 2;
+// 3: 접힌 댓글 펼치기 단계(expand)와 remaining·candidates 구간 추가
+export const DIAG_SCHEMA_VERSION = 3;
 export const ADAPTER_VERSION = "band-web-1";
 export const PROBE_SUITE_VERSION = "band-post-1";
 
@@ -23,6 +24,7 @@ export const STAGES = [
   "version",
   "export",
   "userCheck",
+  "expand",
 ] as const;
 export const STATES = ["ok", "fail", "unknown", "unsupported", "skipped", "partial"] as const;
 export const ERROR_CODES = [
@@ -187,6 +189,10 @@ export interface DiagEvent {
   waiting?: boolean;
   end?: (typeof END_EVIDENCE)[number];
   attempt?: number;
+  /** 펼치기 뒤에도 표시 수보다 모자란 댓글 수(구간) */
+  remaining?: CountBucket;
+  /** 처음 찾은 펼치기 버튼 수(구간) */
+  candidates?: CountBucket;
 }
 
 export interface StructNode {

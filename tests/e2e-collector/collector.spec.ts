@@ -57,7 +57,11 @@ test("목록에서 글 찾기 → 순차 수집 → 일부·실패 보고 → .a
   await expect(stat(p, "실패").first()).toHaveText("1");
   // 로그인 화면을 이미지로 준 주소(T14) + 서버에 없는 이미지(404)
   await expect(stat(p, "이미지 실패")).toHaveText("2");
-  await expect(p.locator("tr.st-partial")).toContainText("14개 중 8개");
+  // 7번 글은 '이전 댓글 보기'를 눌러 14개를 모두 확보, 9번 글은 펼칠 버튼이 없어 일부 확보
+  await expect(p.locator("tr.st-partial")).toContainText("12개 중 8개");
+  await expect(p.locator("tr.st-partial")).toContainText("펼칠 버튼을 찾지 못함");
+  await expect(p.locator(".totals")).toContainText("저장한 글 21개");
+  await expect(p.locator("tr", { hasText: "· 7번 글의" })).toContainText("14 / 14");
   await expect(p.locator("tr.st-failed")).toContainText("게시글을 찾지 못했습니다");
 
   // 로컬 확인

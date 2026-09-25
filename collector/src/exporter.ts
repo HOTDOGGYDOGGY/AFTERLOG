@@ -63,6 +63,12 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
         reasons: t.reasons,
       })),
     },
+    totals: {
+      posts: caps.length,
+      comments: caps.reduce((n, c) => n + (c.commentsFound || 0), 0),
+      commentsShown: caps.reduce((n, c) => n + Math.max(c.commentsShown ?? c.commentsFound ?? 0, c.commentsFound || 0), 0),
+      memberComments: job.options.selection?.commentsOnly ? obs.filter((o) => o.inRange !== false).length : 0,
+    },
     selection: job.options.selection
       ? {
           summary: describeSelection(job.options.selection),

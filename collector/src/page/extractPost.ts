@@ -21,9 +21,19 @@ export interface PostExtraction {
   waitedMs: number;
   /** 알려진 확인 위치별 발견 개수(진단용, 숫자만) */
   probeCounts: Record<string, number>;
+  /** 접힌 댓글 펼치기: 누른 횟수 · 처음 찾은 버튼 수 */
+  expandClicks?: number;
+  expandCandidates?: number;
 }
 
-export async function extractPostInPage(opts: { timeoutMs: number; stableMs: number; probes: [string, string][] }): Promise<PostExtraction> {
+export async function extractPostInPage(opts: {
+  timeoutMs: number;
+  stableMs: number;
+  probes: [string, string][];
+  /** 접힌 댓글 펼치기 전체 제한 시간 · 한 번 누른 뒤 변화를 기다리는 시간 */
+  expandMs?: number;
+  expandWaitMs?: number;
+}): Promise<PostExtraction> {
   const t0 = Date.now();
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const txt = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -144,6 +154,71 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
       probeCounts: countProbes(card),
     };
 
+  // ---- 접힌 댓글 펼치기 ----
+  // 표시된 댓글 수보다 화면의 댓글이 적으면 '이전 댓글·답글 더보기' 같은 버튼만 눌러 불러온다(읽기 전용).
+  // 누르는 버튼: 댓글 영역 안, 글자나 클래스가 '이전 댓글/댓글 더보기/답글 N개 보기'류인 것. 답글쓰기·표정·번역·숨기기·신고·메뉴·입력칸은 제외
+  const shownOf = (c: Element) => {
+    const raw = txt(c.querySelector(".dPostCountView .comment .count")).replace(/,/g, "");
+    return /^\d+$/.test(raw) ? Number(raw) : null;
+  };
+  const TEXT_OK = /^(이전\s*댓글|이전\s*답글|지난\s*댓글|댓글\s*\d*\s*개?\s*더\s*보기|답글\s*\d*\s*개?\s*(더\s*)?보기|이전\s*댓글\s*\d*\s*개?\s*(더\s*)?보기)/;
+  const CLASS_OK = /prevComment|PrevComment|moreComment|MoreComment|commentMore|CommentMore|prevReply|PrevReply|replyMore|ReplyMore|moreReply|MoreReply|previousComment|PreviousComment/;
+  const CLASS_DENY = /mute|Mute|emotion|Emotion|translat|Translat|setting|Setting|submit|Submit|write|Write|delete|Delete|remove|Remove|report|Report|_replyBtn|share|Share|like|Like|menu|Menu|upload|Upload|edit|Edit|sticker|Sticker/;
+  const tried = new WeakSet<Element>();
+  const hiddenEl = (el: Element) => {
+    for (let n: Element | null = el; n && n !== card; n = n.parentElement) {
+      if ((n as HTMLElement).hidden) return true;
+      const st = n.ownerDocument?.defaultView?.getComputedStyle(n);
+      if (st && (st.display === "none" || st.visibility === "hidden")) return true;
+    }
+    return false;
+  };
+  const expanders = (c: Element) => {
+    const area = c.querySelector(".dPostCommentMainView") ?? c;
+    return Array.from(area.querySelectorAll('button, a, [role="button"]')).filter((el) => {
+      if (tried.has(el) || hiddenEl(el)) return false;
+      if (el.closest('form, textarea, [contenteditable="true"], .commentWrite, .dPostCommentWriteView, ._commentWriteArea, .mentions-input')) return false;
+      const cls = (el.getAttribute("class") ?? "") + " " + (el.getAttribute("data-uiselector") ?? "");
+      if (CLASS_DENY.test(cls)) return false;
+      const t = txt(el);
+      return TEXT_OK.test(t) || (CLASS_OK.test(cls) && t.length <= 40);
+    });
+  };
+  const shown0 = shownOf(card);
+  let expandClicks = 0;
+  const expandCandidates = expanders(card).length;
+  if (shown0 !== null && card.querySelectorAll(".cComment").length < shown0) {
+    const until = Date.now() + (opts.expandMs ?? 60_000);
+    while (expandClicks < 120 && Date.now() < until) {
+      const found = card.querySelectorAll(".cComment").length;
+      if (found >= shown0) break;
+      const btn = expanders(card)[0] as HTMLElement | undefined;
+      if (!btn) break;
+      const before = `${found}:${card.innerHTML.length}`;
+      btn.click();
+      expandClicks++;
+      let changed = false;
+      for (const t0 = Date.now(); Date.now() - t0 < (opts.expandWaitMs ?? 6000); ) {
+        await sleep(200);
+        if (`${card.querySelectorAll(".cComment").length}:${card.innerHTML.length}` !== before) {
+          changed = true;
+          break;
+        }
+      }
+      // 눌러도 바뀌지 않는 버튼은 다시 누르지 않는다. 바뀌었으면 불러오기가 끝날 때까지 잠깐 더 본다
+      if (!changed) tried.add(btn);
+      else {
+        let last = "";
+        for (let i = 0; i < 15; i++) {
+          await sleep(200);
+          const sig = `${card.querySelectorAll(".cComment").length}:${card.innerHTML.length}`;
+          if (sig === last) break;
+          last = sig;
+        }
+      }
+    }
+  }
+
   const clone = card.cloneNode(true) as Element;
   // 해석기는 .cPostCard를 게시글 범위로 찾으므로, 작성자 영역으로 찾은 범위에도 같은 표시를 붙인다
   clone.classList.add("cPostCard");
@@ -177,5 +252,7 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
     accountMarker: face?.src ? face.src.split(/[?#]/)[0].split("/").pop() ?? null : null,
     waitedMs: Date.now() - t0,
     probeCounts: countProbes(card),
+    expandClicks,
+    expandCandidates,
   };
 }

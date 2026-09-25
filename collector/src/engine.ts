@@ -42,7 +42,7 @@ const iso = (t: number) => new Date(t).toISOString();
 const INTERRUPTED = { ok: false as const, code: "other", text: "일시정지", retry: true, interrupted: true };
 
 /**
- * 이전 작업에서 저장한 본문을 이 작업에 다시 쓴다(열지 않음, 7.1-4). 결과에는 '이전 저장본 재사용'으로 남긴다(9절 최신성).
+ * 이전 작업에서 저장한 본문을 이 작업에 다시 쓴다(열지 않음, 7.1-4). 댓글을 다 못 받은(일부) 저장본은 쓰지 않고 다시 연다. 결과에는 '이전 저장본 재사용'으로 남긴다(9절 최신성).
  * 트랜잭션 안에서 부른다. 과제에 넣을 상태 필드를 돌려준다
  */
 async function reuseCapture(before: Capture, jobId: string, taskId: string, key: string, reasons: SelectReason[]): Promise<Partial<Task>> {
@@ -58,8 +58,12 @@ async function reuseCapture(before: Capture, jobId: string, taskId: string, key:
 }
 
 /** 이 글의 저장본(이전 작업 것 포함, 결과에서 뺀 것 제외). 가장 최근 것 */
-async function findCapture(key: string, notJob?: string): Promise<Capture | undefined> {
-  const all = await cdb().captures.where("key").equals(key).filter((c) => !c.excluded && c.jobId !== notJob).toArray();
+async function findCapture(key: string, notJob?: string, completeOnly = false): Promise<Capture | undefined> {
+  const all = await cdb()
+    .captures.where("key")
+    .equals(key)
+    .filter((c) => !c.excluded && c.jobId !== notJob && (!completeOnly || c.commentsShown === null || c.commentsShown <= c.commentsFound))
+    .toArray();
   return all.sort((a, b) => (a.capturedAt < b.capturedAt ? 1 : -1))[0];
 }
 
@@ -423,7 +427,7 @@ export class Engine {
             await addReason(exists, reason, job);
             continue;
           }
-          const before = job.options.skipCaptured ? await findCapture(key, job.id) : undefined;
+          const before = job.options.skipCaptured ? await findCapture(key, job.id, true) : undefined;
           const id = crypto.randomUUID();
           await cdb().tasks.add({
             id,
@@ -651,7 +655,7 @@ export class Engine {
         return;
       }
       const order = (await cdb().tasks.where("jobId").equals(job.id).count()) + 1;
-      const before = job.options.skipCaptured ? await findCapture(key, job.id) : undefined;
+      const before = job.options.skipCaptured ? await findCapture(key, job.id, true) : undefined;
       const id = crypto.randomUUID();
       await cdb().tasks.add({
         id,
@@ -776,6 +780,14 @@ export class Engine {
     // 미분류로 보존한 댓글 영역도 화면의 댓글 하나로 센다
     const foundComments = doc.entries.filter((e) => e.kind !== "post").length;
     const countOk = ex.commentsShown === null ? null : ex.commentsShown === foundComments;
+    if (ex.commentsShown !== null && (ex.expandClicks || ex.commentsShown > foundComments))
+      await diag.event(task.id, {
+        stage: "expand",
+        state: ex.commentsShown <= foundComments ? "ok" : "partial",
+        count: countBucket(ex.expandClicks ?? 0),
+        candidates: countBucket(ex.expandCandidates ?? 0),
+        remaining: countBucket(Math.max(0, ex.commentsShown - foundComments)),
+      });
     await diag.event(task.id, {
       stage: "countCheck",
       state: countOk === null ? "unknown" : countOk ? "ok" : "partial",
@@ -848,7 +860,9 @@ export class Engine {
           url: capture.url,
           leaseUntil: 0,
           errorCode: partial ? "countMismatch" : null,
-          errorText: partial ? `표시된 댓글 ${ex.commentsShown}개 중 ${foundComments}개만 화면에 있었습니다(접힌 댓글 미로딩 가능).` : null,
+          errorText: partial
+            ? `표시된 댓글 ${ex.commentsShown}개 중 ${foundComments}개만 확보했습니다(${ex.expandClicks ? `'이전 댓글' 펼치기 ${ex.expandClicks}번 뒤에도 모자람` : "펼칠 버튼을 찾지 못함"}. 삭제·숨김 댓글이거나 불러오지 못한 댓글일 수 있음).`
+            : null,
           result: { title: doc.title, commentsShown: ex.commentsShown, commentsFound: foundComments, ...judged },
         });
         if (!job.bandName && ex.bandName) await cdb().jobs.update(job.id, { bandName: ex.bandName, bandNo: capture.bandNo || job.bandNo });
@@ -1001,7 +1015,7 @@ export async function createJob(input: {
     await cdb().jobs.add(job);
     for (const t of tasks) {
       // 이전 작업의 저장본이 있으면 다시 열지 않고 쓴다(지금 열린 탭에서 저장하는 경우는 항상 새로 읽음)
-      const before = input.options.skipCaptured && t.kind === "post" && t.tabId === undefined ? await findCapture(t.key, job.id) : undefined;
+      const before = input.options.skipCaptured && t.kind === "post" && t.tabId === undefined ? await findCapture(t.key, job.id, true) : undefined;
       await cdb().tasks.add({ ...t, ...(before ? await reuseCapture(before, job.id, t.id, t.key, t.reasons ?? []) : {}) });
     }
   });
