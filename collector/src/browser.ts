@@ -2,6 +2,7 @@
 import type { PostExtraction } from "./page/extractPost";
 import type { DiscoverRound } from "./page/discoverLinks";
 import type { MemberCommentsRound, OpenCommentPostResult } from "./page/memberComments";
+import type { ProfileExtraction } from "./page/profile";
 
 /** 수집 탭의 역할: 목록·댓글 목록 탐색 / 글 열기 */
 export type TabRole = "discover" | "body";
@@ -33,6 +34,8 @@ export interface CollectorBrowser {
   readMemberComments?(opts: { from: number; scroll: boolean }): Promise<MemberCommentsRound>;
   /** 멤버 댓글 목록 항목을 눌러 원글 번호를 읽고 닫는다(탐색 탭) */
   openCommentPost?(opts: { seq: number; expectText: string; expectDate: string; bandNo: string }): Promise<OpenCommentPostResult>;
+  /** 인물 프로필 화면을 열어 끝까지 스크롤한 뒤 보관본을 만든다(글 탭, 아무것도 누르지 않음) */
+  captureProfile?(url: string): Promise<{ ex: ProfileExtraction; loadMs: number }>;
   /** 실패한 화면의 구조 표본(진단용) */
   sampleStructure(target: { url?: string; tabId?: number }): Promise<unknown>;
   fetchAsset(url: string): Promise<FetchedAsset>;

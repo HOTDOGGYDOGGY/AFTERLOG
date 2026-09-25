@@ -2,6 +2,7 @@
 // 수집 전용 창(목록용·글용)을 열고 그 안에서만 이동한다. 사용자의 탭(tabId)은 이동시키지 않고 읽기만 한다.
 import { BAND_ORIGINS, LIMITS, MIN_DELAY_MS } from "./config";
 import { BrowserError, fetchImage, type CollectorBrowser, type TabRole } from "./browser";
+import { captureProfileInPage, type ProfileExtraction } from "./page/profile";
 import { openCommentPostInPage, readMemberCommentsInPage, type MemberCommentsRound, type OpenCommentPostResult } from "./page/memberComments";
 import { extractPostInPage, type PostExtraction } from "./page/extractPost";
 import { discoverRoundInPage, type DiscoverRound } from "./page/discoverLinks";
@@ -147,6 +148,15 @@ export class ChromeBrowser implements CollectorBrowser {
     return this.exec<[{ seq: number; expectText: string; expectDate: string; bandNo: string; timeoutMs: number }], OpenCommentPostResult>(tabId, openCommentPostInPage, [
       { ...opts, timeoutMs: Math.min(LIMITS.pageTimeoutMs, 15_000) },
     ]);
+  }
+
+  async captureProfile(url: string) {
+    const { tabId, ms } = await this.navigate(url, "body");
+    const t0 = Date.now();
+    const ex = await this.exec<[{ waitMs: number; maxRounds: number; maxCssBytes: number; readyMs: number }], ProfileExtraction>(tabId, captureProfileInPage, [
+      { waitMs: Math.max(1000, MIN_DELAY_MS), maxRounds: 200, maxCssBytes: 3 * 1024 * 1024, readyMs: LIMITS.pageTimeoutMs },
+    ]);
+    return { ex, loadMs: ms + (Date.now() - t0) };
   }
 
   async sampleStructure(target: { url?: string; tabId?: number }) {

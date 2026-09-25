@@ -15,6 +15,7 @@ import { BandHome } from "./BandHome";
 import { DocSession, type BandViewMode } from "./DocSession";
 import { PersonLayer } from "./PersonLayer";
 import { ImportPanel } from "../panels/ImportPanel";
+import { ProfileSnapshots } from "./ProfileSnapshots";
 import { CaptureReports } from "../panels/CaptureReports";
 import { ExportDialog } from "../panels/ExportDialog";
 import type { AppThemeResolved } from "../../renderers/band/style";
@@ -177,6 +178,11 @@ export function BandModule({
     return (
       <div className="band-module" hidden={!active}>
         {importButton}
+        {projectId ? (
+          <div className="band-empty-profiles">
+            <ProfileSnapshots projectId={projectId} refreshKey={captureReports.length} />
+          </div>
+        ) : null}
         <BandEmpty projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} />
         {importSheet}
       </div>
@@ -218,6 +224,7 @@ export function BandModule({
           appTheme={appTheme}
           dimmed={layerOpen}
           captureCount={captureReports.length}
+          sideExtra={<ProfileSnapshots projectId={projectId} refreshKey={captureReports.length} />}
           onOpenDoc={(id) => navigate({ screen: "post", docId: id })}
           onOpenPerson={(key) => navigate({ screen: "person", person: key })}
           onOpenChat={() => navigate({ screen: "chat" })}

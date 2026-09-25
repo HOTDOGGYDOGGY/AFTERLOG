@@ -3,13 +3,13 @@
 // 창이 닫히거나 확장이 업데이트되어도 점유(lease)가 끝난 과제는 다시 대기열로 돌아가 이어받는다.
 import { parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
-import { cdb, type Capture, type CommentObservation, type Job, type SelectReason, type Selection, type Task } from "./db";
+import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type SelectReason, type Selection, type Task } from "./db";
 import { parseKoreanDateTime } from "../../src/importers/band/time";
 import { commentInCapture, describeSelection, judgePost, type PostVerdict } from "./selection";
 import { BrowserError, imageQuality, type CollectorBrowser, type TabRole } from "./browser";
 import { DiagRecorder, pruneDiagnostics } from "./diagnostics/recorder";
 import { countBucket, durationBucket, sizeBucket, type CountBucket, type ProbeId } from "./diagnostics/schema";
-import { parseBandUrl, postKey } from "./urls";
+import { parseBandUrl, parseMemberUrl, postKey } from "./urls";
 
 export type EngineEvent = { type: "changed"; jobId: string } | { type: "stopped"; jobId: string; reason: string };
 
@@ -270,7 +270,7 @@ export class Engine {
 
   /** 한쪽(탐색 또는 글 저장) 일꾼. 할 일이 더 없으면 "idle" */
   private async worker(jobId: string, diag: DiagRecorder, role: TabRole): Promise<"idle" | "paused" | "stopped" | "needsUser"> {
-    const kinds: Task["kind"][] = role === "discover" ? ["list", "comments"] : ["post"];
+    const kinds: Task["kind"][] = role === "discover" ? ["list", "comments"] : ["post", "profile"];
     let sameErrorRun = 0;
     let lastError: string | null = null;
     for (;;) {
@@ -312,7 +312,14 @@ export class Engine {
       await this.setJob(jobId, { current: task.url });
       let outcome: { ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" | "paused"; interrupted?: boolean };
       try {
-        outcome = task.kind === "list" ? await this.runList(cur, task, diag) : task.kind === "comments" ? await this.runComments(cur, task, diag) : await this.runPost(cur, task, diag);
+        outcome =
+          task.kind === "list"
+            ? await this.runList(cur, task, diag)
+            : task.kind === "comments"
+              ? await this.runComments(cur, task, diag)
+              : task.kind === "profile"
+                ? await this.runProfile(cur, task, diag)
+                : await this.runPost(cur, task, diag);
       } catch (e) {
         const code = e instanceof BrowserError ? e.code : "other";
         outcome = { ok: false, code, text: (e as Error).message || "알 수 없는 오류", retry: code !== "loginRequired", stopJob: code === "loginRequired" ? "needsUser" : undefined };
@@ -714,6 +721,55 @@ export class Engine {
     for (const id of reopen) await cdb().tasks.where("id").equals(id).filter((t) => t.status === "succeeded").modify({ status: "pending", attempts: 0, notBefore: 0 });
   }
 
+  // ---------- 인물 프로필 ----------
+
+  /** 프로필 화면 보관본(스냅숏). 구조를 해석하지 않고 보이는 모습 그대로 + 이미지. 아무것도 누르지 않는다 */
+  private async runProfile(job: Job, task: Task, diag: DiagRecorder): Promise<{ ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" }> {
+    const br = this.deps.browser;
+    const m = parseMemberUrl(task.url);
+    if (!br.captureProfile || !m) return { ok: false, code: "navigationFailed", text: "인물 프로필 주소가 아닙니다.", retry: false };
+    await this.gate();
+    const { ex, loadMs } = await br.captureProfile(task.url);
+    await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", wait: durationBucket(loadMs), page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
+    if (!ex.ok) {
+      if (ex.reason === "login") return { ok: false, code: "loginRequired", text: "밴드에 로그인해야 합니다. 로그인한 뒤 이어받기를 누르세요.", retry: false, stopJob: "needsUser" };
+      await diag.event(task.id, { stage: "profile", state: "fail", code: "selectorMissing" });
+      return { ok: false, code: "selectorMissing", text: "프로필 화면 내용을 찾지 못했습니다(권한·화면 구조 변경 가능).", retry: true };
+    }
+    await diag.event(task.id, { stage: "profile", state: ex.cssTruncated ? "partial" : "ok", count: countBucket(ex.stories.length), candidates: countBucket(ex.imageUrls.length) });
+    const cap: ProfileCapture = {
+      id: crypto.randomUUID(),
+      jobId: job.id,
+      taskId: task.id,
+      bandNo: m.bandNo,
+      memberKey: m.memberKey,
+      url: task.url,
+      name: ex.name,
+      description: ex.description,
+      html: ex.html!,
+      css: ex.css,
+      cssTruncated: ex.cssTruncated,
+      imageUrls: ex.imageUrls,
+      stories: ex.stories,
+      capturedAt: iso(this.now()),
+      collectorVersion: COLLECTOR_VERSION,
+    };
+    await cdb().transaction("rw", [cdb().profiles, cdb().tasks], async () => {
+      await cdb().profiles.where("taskId").equals(task.id).delete();
+      await cdb().profiles.add(cap);
+      await cdb().tasks.update(task.id, {
+        status: "succeeded",
+        leaseUntil: 0,
+        errorCode: null,
+        errorText: null,
+        result: { title: `프로필${ex.name ? ` · ${ex.name}` : ""}`, stories: ex.stories.length, images: ex.imageUrls.length },
+      });
+    });
+    if (ex.name) await this.learnMemberName(job.id, m.memberKey, ex.name);
+    if (job.options.includeImages) this.queueAssets(ex.imageUrls, task.id, diag);
+    return { ok: true };
+  }
+
   // ---------- 글 하나 ----------
 
   private async runPost(job: Job, task: Task, diag: DiagRecorder): Promise<{ ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" }> {
@@ -994,12 +1050,13 @@ export async function createJob(input: {
 }): Promise<Job> {
   // 선택 수집: 인물마다 작성글 목록(A)·작성댓글 목록(B·C) 과제를 만든다. 밴드 전체 목록은 먼저 훑지 않는다(7.1)
   const sel = input.options.selection;
-  const selLists: { url: string; kind: "list" | "comments"; reason: SelectReason; memberKey: string }[] = [];
+  const selLists: { url: string; kind: "list" | "comments" | "profile"; reason: SelectReason; memberKey: string }[] = [];
   if (sel) {
     for (const m of sel.members) {
       const base = `${m.origin ?? "https://band.us"}/band/${m.bandNo}/member/${m.memberKey}`;
       if (sel.authored) selLists.push({ url: `${base}/post`, kind: "list", reason: "authored", memberKey: m.memberKey });
       if (sel.commentsOnly || sel.commentedPosts) selLists.push({ url: `${base}/comment`, kind: "comments", reason: "commented", memberKey: m.memberKey });
+      if (sel.profile) selLists.push({ url: `${base}/profile`, kind: "profile", reason: "list", memberKey: m.memberKey });
     }
     // 검색 결과: 사용자가 연 주소를 그대로(검색어·조건을 일반 주소 정리로 잃지 않게, 4.2)
     if (sel.search) for (const url of sel.search.urls?.length ? sel.search.urls : [sel.search.url]) selLists.push({ url, kind: "list", reason: "search", memberKey: "" });

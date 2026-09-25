@@ -14,8 +14,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   } else if (msg.act === "list") {
     q.set("new", "list");
     q.set("url", sender.tab.url || "");
-  } else if (typeof msg.act === "string" && /^sel:[ABC]+$/.test(msg.act)) {
-    // 인물 선택 수집: A 쓴 글 · B 쓴 댓글만 · C 댓글 단 글
+  } else if (typeof msg.act === "string" && /^sel:[ABCP]+$/.test(msg.act)) {
+    // 인물 선택 수집: A 쓴 글 · B 쓴 댓글만 · C 댓글 단 글 · P 프로필 보관
     q.set("new", "sel");
     q.set("modes", msg.act.slice(4));
     q.set("url", sender.tab.url || "");

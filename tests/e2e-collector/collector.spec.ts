@@ -361,3 +361,52 @@ test("검색 결과 주소 여러 개: 넣으면 검색어를 읽어 아래 칸�
   expect(strFromU8(files["index.html"])).toContain("17번 글의 첫 줄 대사.");
   await mgr.close();
 });
+
+test("인물 프로필 보관: '이 프로필 저장' → 끝까지 스크롤해 스토리 4개, 사진·스타일째 보관, 아무것도 누르지 않음", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/member/MKDAON/profile`);
+  const bar = band.locator("#afterlog-collector-bar");
+  const mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 프로필 저장" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 120_000);
+  const tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await expect(tile.locator("b")).toHaveText("스토리 4");
+  await expect(tile).toContainText("다온");
+  await expect(tile).toContainText("사진 2장");
+  await mgr.screenshot({ path: `${OUT}/10-profile-finished.png`, fullPage: true });
+  // 보관본: 스타일·이미지(데이터로 포함)·스크롤로 더 불러온 스토리까지
+  const viewP = ctx.waitForEvent("page");
+  await tile.getByRole("button", { name: "보관본 보기" }).click();
+  const view = await viewP;
+  await view.waitForLoadState();
+  await expect(view.locator(".profileName")).toHaveText("다온");
+  await expect(view.locator(".storyItem")).toHaveCount(4);
+  await expect(view.locator("body")).toContainText("SPIN-OFF!");
+  expect(await view.locator(".profileImage").getAttribute("src")).toMatch(/^data:image\//);
+  expect(await view.locator(".profileCover").evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("data:image/");
+  expect(await view.locator(".profileName").evaluate((el) => getComputedStyle(el).fontSize)).toBe("24px");
+  expect(await view.evaluate(() => document.querySelectorAll("script").length)).toBe(0);
+  await view.screenshot({ path: `${OUT}/11-profile-snapshot.png`, fullPage: true });
+  await view.close();
+  // 하트(좋아요)는 누르지 않았다
+  for (const p of ctx.pages().filter((x) => x.url().includes("/member/MKDAON/profile"))) expect(await p.evaluate(() => (window as unknown as { __liked: number }).__liked)).toBe(0);
+  // .afterlog → 웹 앱의 '인물 프로필 보관'
+  const dl = mgr.waitForEvent("download");
+  await mgr.getByRole("button", { name: /\.afterlog로 저장/ }).click();
+  const file = resolve(OUT, "profile.afterlog");
+  await (await dl).saveAs(file);
+  const web = await ctx.newPage();
+  await web.goto("http://localhost:5179/");
+  // 앞 검사에서 연 프로젝트가 있을 수 있어 프로젝트 메뉴에서 연다(첫 화면 '파일 열기'는 로컬 실행판 검사에서 확인)
+  await web.locator(".project-switch").click();
+  const chooser = web.waitForEvent("filechooser");
+  await web.getByRole("button", { name: /파일 열기 \(\.afterlog\)/ }).click();
+  await (await chooser).setFiles(file);
+  await expect(web.locator(".profile-snapshots")).toContainText("인물 프로필 보관 1");
+  await expect(web.locator(".profile-snapshots")).toContainText("다온");
+  await web.close();
+  await mgr.close();
+  await band.close();
+});

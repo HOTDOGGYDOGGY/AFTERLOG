@@ -1,3 +1,4 @@
+import type React from "react";
 // 밴드 원형 보기의 바탕 화면: 왼쪽 밴드 정보, 가운데 게시글 피드, 오른쪽 채팅 목록.
 // 보관된 자료에서 계산한 값만 보여 준다(가짜 통계·초대·글쓰기 버튼 없음). 글을 누르면 상세 레이어가 위에 열린다.
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +27,7 @@ export function BandHome({
   onOpenChat,
   dimmed,
   captureCount,
+  sideExtra,
 }: {
   title: string;
   docs: DocumentData[];
@@ -37,6 +39,8 @@ export function BandHome({
   onOpenChat(): void;
   dimmed: boolean;
   captureCount: number;
+  /** 왼쪽 밴드 정보 아래에 더 보여 줄 것(인물 프로필 보관 등) */
+  sideExtra?: React.ReactNode;
 }) {
   const [sort, setSort] = useState<Sort>("source");
   const [q, setQ] = useState("");
@@ -101,6 +105,7 @@ export function BandHome({
               ) : null;
             })}
           </nav>
+          {sideExtra}
         </aside>
 
         <main className="band-feed" aria-label="게시글">

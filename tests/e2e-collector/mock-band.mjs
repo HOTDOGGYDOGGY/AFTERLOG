@@ -85,10 +85,34 @@ const band = http.createServer((req, res) => {
     return send(200, page(`<h2>'${k}' 검색 결과</h2><div id="feed">${hit.map((n) => `<div class="feed-item" style="height:220px">${itemHtml(n)}</div>`).join("")}</div>`));
   }
   // 인물(멤버) 화면: 프로필 · 작성글 목록 · 작성댓글 목록(실제 저장 샘플과 같은 구조)
-  m = url.pathname.match(new RegExp(`^/band/${BAND}/member/(MK[A-Z]+)(?:/(post|comment))?$`));
+  m = url.pathname.match(new RegExp(`^/band/${BAND}/member/(MK[A-Z]+)(?:/(post|comment|profile))?$`));
   if (m) {
     const key = m[1];
     const tab = m[2] ?? "post";
+    if (tab === "profile") {
+      // 사용자가 보여 준 화면과 비슷한 모양: 커버(배경 이미지)·프로필 사진·이름·소개·하트 버튼·스토리 목록(스크롤하면 더 불러옴)
+      const story = (i) => {
+        const d = ["2026년 2월 23일 오전 12:27", "2026년 1월 30일 오후 8:20", "2026년 1월 30일 오후 8:19", "2026년 1월 30일 오후 8:18"][i];
+        const t = ["SPIN-OFF! 코인으로 비리 건 해결 후 복귀", "Coin", "Notice", "Profile"][i];
+        const n = [[0, 0], [0, 18], [0, 2], [0, 0]][i];
+        return `<li class="storyItem"><span class="storyDate">${d}</span><p class="storyText">${t}</p>${i === 3 ? `<a class="linkPreview" href="/band/${BAND}/post/37">프로필 소수합격요소</a>` : ""}<div class="storyCount"><span class="emotion">${n[0]}</span><span class="comment">${n[1]}</span></div></li>`;
+      };
+      const css = `.profileCover{height:140px;border-radius:16px;background-image:url("http://127.0.0.1:4589/img/band_cover.png");background-size:cover}
+        .profileName{font-size:24px;font-weight:700;text-align:center}.profileDesc{font-size:13px;text-align:center;color:#777}
+        .storyList{list-style:none;padding:0}.storyItem{height:260px;border-left:2px solid #ddd;padding-left:16px}.storyDate{color:#999;font-size:12px}`;
+      const script = `window.__liked=0;document.querySelector('.btnLike').addEventListener('click',()=>{window.__liked++});
+        let more=true;window.addEventListener('scroll',()=>{if(more&&innerHeight+scrollY>=document.body.scrollHeight-50){more=false;setTimeout(()=>{document.querySelector('.storyList').insertAdjacentHTML('beforeend',document.getElementById('more').innerHTML)},300)}});`;
+      return send(
+        200,
+        page(
+          `<style>${css}</style><main id="content"><div class="profileCover"><button type="button" class="btnLike" aria-label="좋아요">♡</button></div>
+          <img class="profileImage" src="http://127.0.0.1:4589/img/avatar_garam.png" width="120" height="120" alt="프로필 사진">
+          <strong class="profileName">${key === "MKDAON" ? "다온" : "나래"}</strong><p class="profileDesc">B 27 XX 168 배우</p>
+          <h3>스토리</h3><ul class="storyList">${story(0)}${story(1)}</ul><template id="more">${story(2)}${story(3)}</template></main>`,
+          script,
+        ),
+      );
+    }
     const name = key === "MKDAON" ? "다온" : "나래";
     const head = `<div class="accountSectionHeader"><div class="uHeaderWrap"><header class="header"><h1 class="title"><span class="sf_color">${name}</span>님의 글</h1></header></div>
       <ul class="userPostNav"><li><a class="navItem" href="/band/${BAND}/member/${key}/post">글</a></li><li><a class="navItem" href="/band/${BAND}/member/${key}/comment">댓글</a></li></ul></div>`;

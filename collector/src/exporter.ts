@@ -7,7 +7,7 @@ import { buildDocument } from "../../src/importers/band/build";
 import { BAND_HTML_PARSER_VERSION, imageRefFromSrc, parseBandHtml } from "../../src/importers/band/html";
 import { sha256Hex } from "../../src/storage/hash";
 import { COLLECTOR_VERSION } from "./config";
-import { cdb, type Capture, type CommentObservation, type Job, type Task } from "./db";
+import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type Task } from "./db";
 import { describeSelection } from "./selection";
 import { safeName } from "../../src/exporters/fileName";
 
@@ -102,6 +102,40 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
   };
 }
 
+/** 프로필 보관본을 혼자 열리는 HTML로(스타일·이미지 포함, 스크립트 없음) */
+export async function profileStandaloneHtml(p: ProfileCapture): Promise<string> {
+  const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  let html = p.html;
+  let css = p.css;
+  for (const url of p.imageUrls) {
+    const a = await cdb().assets.get(url);
+    if (!a || a.status !== "stored" || !a.blob) continue;
+    const buf = new Uint8Array(await a.blob.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    const data = `data:${a.mime ?? "image/png"};base64,${btoa(bin)}`;
+    // 속성·style 안의 주소 모두(따옴표·&amp; 표기 차이 포함)
+    for (const form of new Set([url, url.replace(/&/g, "&amp;")])) {
+      html = html.split(form).join(data);
+      css = css.split(form).join(data);
+    }
+  }
+  const title = `${p.name ?? "인물"} 프로필`;
+  return `<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="AFTERLOG Collector ${esc(p.collectorVersion)}">
+<title>${esc(title)}</title>
+<style>${css}</style>
+<style>html,body{height:auto!important;overflow:auto!important}body{margin:0 auto;max-width:720px}.afterlog-note{font:12px/1.5 system-ui,sans-serif;color:#666;padding:8px 12px;border-bottom:1px solid #ddd;background:#fafafa}</style>
+</head><body>
+<div class="afterlog-note">AFTERLOG 수집 확장이 ${esc(new Date(p.capturedAt).toLocaleString())}에 보관한 프로필 화면입니다(보이는 모습 그대로, 누르는 기능은 동작하지 않음). 원래 주소: <a href="${esc(p.url)}" target="_blank" rel="noreferrer">${esc(p.url)}</a>${p.cssTruncated ? " · 스타일 일부가 커서 잘렸습니다." : ""}</div>
+${html}
+</body></html>
+`;
+}
+
 /** 작업 하나를 .afterlog 파트들로 */
 export async function exportJob(jobId: string, opts: { maxPartBytes?: number } = {}): Promise<{ parts: ExportedPart[]; documents: number; report: CaptureReport }> {
   const { job, documents, assets, sources, report, projectId, exportedAt } = await buildJobDocuments(jobId);
@@ -140,8 +174,10 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
  * 글이 하나면 HTML 하나, 여러 개면 글마다 HTML + 목차(index.html)를 ZIP 하나로.
  */
 export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = "light"): Promise<{ file: ExportedPart; documents: number; report: CaptureReport }> {
-  const { job, documents, assets, report, docUrls } = await buildJobDocuments(jobId);
-  if (!documents.length) throw new Error("저장한 글이 없습니다.");
+  const { job, documents, assets, report, docUrls, profileFiles } = await buildJobDocuments(jobId);
+  if (!documents.length && !profileFiles.length) throw new Error("저장한 글이 없습니다.");
+  if (!documents.length && profileFiles.length === 1)
+    return { file: { blob: new Blob([profileFiles[0].html], { type: "text/html;charset=utf-8" }), fileName: profileFiles[0].name }, documents: 0, report };
   const { renderDocumentHtml, usedAssetIds, blobToDataUrl, escapeHtml } = await import("../../src/exporters/html");
   const byId = new Map(assets.map((a) => [a.id, a]));
   const dataUrl = new Map<string, string>();
@@ -156,7 +192,7 @@ export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = 
     return m;
   };
   const base = safeName(job.bandName ?? job.label);
-  if (documents.length === 1) {
+  if (documents.length === 1 && !profileFiles.length) {
     const html = renderDocumentHtml(documents[0], await urlsFor(documents[0]), appTheme);
     return { file: { blob: new Blob([html], { type: "text/html;charset=utf-8" }), fileName: `${safeName(documents[0].title)}.html` }, documents: 1, report };
   }
@@ -176,6 +212,10 @@ export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = 
       `<tr><td>${i + 1}</td><td><a href="${encodeURI(name)}">${escapeHtml(d.title)}</a>${d.inputFormat === "band-member-comments" ? " <small>(댓글 모음)</small>" : ""}</td><td>${comments}</td><td>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">밴드에서 열기 ↗</a>` : ""}</td></tr>`,
     );
   }
+  const profileRows = profileFiles.map((f) => {
+    files[f.name] = strToU8(f.html);
+    return `<li><a href="${encodeURI(f.name)}">${escapeHtml(f.p.name ?? "인물")} 프로필</a> · 스토리 ${f.p.stories.length}개 · 사진 ${f.p.imageUrls.length}장 · <a href="${escapeHtml(f.p.url)}" target="_blank" rel="noreferrer">밴드에서 열기 ↗</a></li>`;
+  });
   const t = report.totals;
   files["index.html"] = strToU8(`<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="AFTERLOG Collector">
@@ -188,7 +228,8 @@ table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;border-bottom:1p
 <h1>${escapeHtml(job.bandName ?? job.label)}</h1>
 <p>${t ? `글 ${t.posts}개 · 댓글 ${t.comments}개${t.commentsShown > t.comments ? ` (밴드 표시 ${t.commentsShown}개)` : ""}${t.memberComments ? ` · 인물 댓글 모음 ${t.memberComments}개` : ""}` : ""}</p>
 <p class="muted">AFTERLOG 수집 확장 v${COLLECTOR_VERSION} · ${new Date(report.exportedAt).toLocaleString()} 저장. 제목을 누르면 그 글이 열립니다. 이 파일들은 인터넷 없이 열립니다. 고치거나 다시 내보내려면 같은 작업의 .afterlog 파일을 AFTERLOG에서 여세요.</p>
-<table><thead><tr><th>#</th><th>글</th><th>댓글</th><th>원래 글</th></tr></thead><tbody>
+${profileRows.length ? `<h2>인물 프로필</h2><ul>${profileRows.join("")}</ul>` : ""}
+${rows.length ? "<h2>글</h2>" : ""}<table><thead><tr><th>#</th><th>글</th><th>댓글</th><th>원래 글</th></tr></thead><tbody>
 ${rows.join("\n")}
 </tbody></table></body></html>
 `);
@@ -304,6 +345,27 @@ async function buildJobDocuments(jobId: string) {
     }
   }
 
+  // 인물 프로필 보관본: 혼자 열리는 HTML로 원문 칸에(앱의 '인물 프로필 보관'에서 연다)
+  const profiles = await cdb().profiles.where("jobId").equals(jobId).toArray();
+  const profileFiles: { name: string; html: string; p: ProfileCapture }[] = [];
+  for (const p of profiles) {
+    const html = await profileStandaloneHtml(p);
+    const bytes = new TextEncoder().encode(html);
+    const name = `프로필_${safeName(p.name ?? p.memberKey).slice(0, 40)}.html`;
+    profileFiles.push({ name, html, p });
+    sources.push({
+      id: crypto.randomUUID(),
+      fileName: name,
+      mime: "text/html",
+      importedAt: p.capturedAt,
+      parserVersion: "profile-snapshot/1",
+      sha256: await sha256Hex(bytes),
+      kind: "band-profile-snapshot",
+      sourceUrl: p.url,
+      data: bytes,
+    });
+  }
   const report = await buildReport(job, tasks, caps, exportedAt, obs);
-  return { job, documents, assets: [...bySha.values()], sources, report, projectId, exportedAt, docUrls };
+  if (profiles.length) report.profiles = profiles.map((p) => ({ name: p.name, url: p.url, stories: p.stories.length, images: p.imageUrls.length, capturedAt: p.capturedAt }));
+  return { job, documents, assets: [...bySha.values()], sources, report, projectId, exportedAt, docUrls, profileFiles };
 }

@@ -25,6 +25,7 @@ export const STAGES = [
   "export",
   "userCheck",
   "expand",
+  "profile",
 ] as const;
 export const STATES = ["ok", "fail", "unknown", "unsupported", "skipped", "partial"] as const;
 export const ERROR_CODES = [

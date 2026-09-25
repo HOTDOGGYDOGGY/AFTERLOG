@@ -4,7 +4,7 @@ import { ChromeBrowser } from "./chromeBrowser";
 import { COLLECTOR_VERSION } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type SelectedMember, type SelectReason, type Selection, type Task } from "./db";
 import { createJob, DEFAULT_OPTIONS, Engine } from "./engine";
-import { exportJob, exportJobHtml } from "./exporter";
+import { exportJob, exportJobHtml, profileStandaloneHtml } from "./exporter";
 import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnostics/recorder";
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
 import { parseBandUrl, parseMemberUrl, parsePostUrlList, parseSearchUrl, postKey } from "./urls";
@@ -224,10 +224,11 @@ export async function jobFromPage(kind: "post" | "list" | "sel" | "search", rawU
       authored: modes.includes("A"),
       commentsOnly: modes.includes("B"),
       commentedPosts: modes.includes("C"),
+      profile: modes.includes("P"),
       periodFrom: null,
       periodTo: null,
     };
-    if (!selection.authored && !selection.commentsOnly && !selection.commentedPosts) return { error: "수집할 항목을 고르지 않았습니다." };
+    if (!selection.authored && !selection.commentsOnly && !selection.commentedPosts && !selection.profile) return { error: "수집할 항목을 고르지 않았습니다." };
     const same = await findSameJob((j) => j.scope === "selection" && JSON.stringify(j.options.selection) === JSON.stringify(selection));
     if (same) return { id: same.id };
     const job = await createJob({ scope: "selection", label: describeSelection(selection), options: { ...DEFAULT_OPTIONS, selection }, bandNo: m.bandNo });
@@ -286,7 +287,9 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
     return u.kind === "member-list" ? u.canonical : `${u.origin.replace("://www.", "://")}/band/${u.bandNo}`;
   });
   const [people, setPeople] = useState(initialMember ? `${initialMember.origin}/band/${initialMember.bandNo}/member/${initialMember.memberKey}` : "");
-  const [modes, setModes] = useState(initialSearch ? { authored: false, commentsOnly: false, commentedPosts: false } : { authored: true, commentsOnly: false, commentedPosts: true });
+  const [modes, setModes] = useState(
+    initialSearch ? { authored: false, commentsOnly: false, commentedPosts: false, profile: false } : { authored: true, commentsOnly: false, commentedPosts: true, profile: false },
+  );
   const [opts, setOpts] = useState({ ...DEFAULT_OPTIONS });
   const [err, setErr] = useState<string | null>(null);
   const parsed = useMemo(() => parsePostUrlList(urls), [urls]);
@@ -315,8 +318,8 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
   };
   const postConds = (members.length ? [modes.authored, modes.commentedPosts].filter(Boolean).length : 0) + (sq ? 1 : 0);
   const selection: Selection = {
-    members: members.length && (modes.authored || modes.commentsOnly || modes.commentedPosts) ? members : [],
-    ...(members.length ? modes : { authored: false, commentsOnly: false, commentedPosts: false }),
+    members: members.length && (modes.authored || modes.commentsOnly || modes.commentedPosts || modes.profile) ? members : [],
+    ...(members.length ? modes : { authored: false, commentsOnly: false, commentedPosts: false, profile: false }),
     periodFrom: opts.periodFrom,
     periodTo: opts.periodTo,
     search: sq ? { url: sq.url, urls: sq.urls, keywords: terms(keywords), match: matchAll ? "all" : "any", exclude: terms(exclude), fields: withComments ? "bodyAndComments" : "body" } : null,
@@ -346,7 +349,7 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
     } else {
       if (badSearch) return setErr(`검색 결과 주소 ${badSearch}개가 밴드 안의 주소가 아닙니다(밴드에서 검색한 뒤 주소창의 주소를 한 줄에 하나씩).`);
       if (!members.length && !sq) return setErr("인물 프로필 주소(https://band.us/band/숫자/member/…)나 검색 결과 주소를 넣어 주세요. 인물 주소는 밴드에서 인물 사진을 눌러 연 화면의 주소입니다.");
-      if (members.length && !modes.authored && !modes.commentsOnly && !modes.commentedPosts) return setErr("인물에 대해 수집할 항목을 하나 이상 골라 주세요.");
+      if (members.length && !modes.authored && !modes.commentsOnly && !modes.commentedPosts && !modes.profile) return setErr("인물에 대해 수집할 항목을 하나 이상 골라 주세요.");
       // 선택 수집의 기간은 모드별 기준으로 판단하므로(5절) 일반 기간 조건은 쓰지 않는다
       const job = await createJob({
         scope: "selection",
@@ -413,6 +416,9 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
             </label>
             <label className="check">
               <input type="checkbox" checked={modes.commentedPosts} onChange={(e) => setModes({ ...modes, commentedPosts: e.target.checked })} /> 이 인물이 댓글 단 글 — 원글과 다른 인물 포함 전체 댓글
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={modes.profile} onChange={(e) => setModes({ ...modes, profile: e.target.checked })} /> 이 인물의 프로필 — 프로필·커버 사진, 이름·소개, 스토리(날짜·글·숫자·링크)를 보이는 모습 그대로 보관
             </label>
             <small className="muted">
               밴드 전체 목록을 먼저 훑지 않고, 인물의 작성글·작성댓글 목록에서 필요한 글만 찾아 엽니다. 댓글 단 글은 댓글 목록 항목을 눌러 원글을 확인합니다(누르기만 하고 아무것도 쓰지 않음).
@@ -533,7 +539,8 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
           <li>접힌 댓글 자동 펼치기: 미지원. 표시 댓글 수와 비교해 '일부 확보'로 알려 줍니다</li>
           <li>검색 결과 수집: 사용자가 연 검색 결과 화면에서 글을 찾고 본문에서 검색어를 다시 확인. 실제 밴드 검색 화면 구조는 <b>미검증</b>(자동 검색 입력은 아직 없음)</li>
           <li>조건 교집합(AND): 모든 후보를 찾은 뒤 모든 조건에 든 글만 엶</li>
-          <li>표정 종류·반응자, 프로필·스토리, 채팅: 아직 미지원</li>
+          <li>인물 프로필: 보이는 모습 그대로 보관(사진·소개·스토리 글·숫자·링크). 화면 구조를 해석하지 않은 보관본이며, 이전 프로필 사진 기록·스토리 댓글은 아직 못 모음(실제 화면 샘플 필요)</li>
+          <li>표정 종류·반응자, 채팅: 아직 미지원</li>
         </ul>
       </details>
     </section>
@@ -588,6 +595,7 @@ function JobView({
   const posts = tasks.filter((t) => t.kind === "post");
   const lists = tasks.filter((t) => t.kind === "list");
   const commentLists = tasks.filter((t) => t.kind === "comments");
+  const profileTasks = tasks.filter((t) => t.kind === "profile");
   const count = (s: Task["status"]) => posts.filter((t) => t.status === s).length;
   const stale = job.status === "running" && !running;
   // 남은 시간: 이 창에서 수집을 시작한 뒤 끝난 글 수로 속도를 잰다
@@ -640,6 +648,14 @@ function JobView({
   const shownComments = kept.reduce((n, c) => n + Math.max(c.commentsShown ?? c.commentsFound ?? 0, c.commentsFound || 0), 0);
   const keptObs = job.options.selection?.commentsOnly ? obs.filter((o) => o.inRange !== false).length : 0;
 
+  const openProfile = async (taskId: string) => {
+    const p = await cdb().profiles.where("taskId").equals(taskId).first();
+    if (!p) return;
+    const url = URL.createObjectURL(new Blob([await profileStandaloneHtml(p)], { type: "text/html;charset=utf-8" }));
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   const retryPartial = async () => {
     const part = posts.filter((t) => t.status === "partial");
     await cdb().transaction("rw", cdb().tasks, async () => {
@@ -661,8 +677,9 @@ function JobView({
 
   const removeJob = async () => {
     if (!confirm("이 작업과 여기서 모은 글을 이 브라우저에서 지울까요? 이미 받은 .afterlog 파일은 그대로입니다.")) return;
-    await cdb().transaction("rw", [cdb().jobs, cdb().tasks, cdb().captures, cdb().comments], async () => {
+    await cdb().transaction("rw", [cdb().jobs, cdb().tasks, cdb().captures, cdb().comments, cdb().profiles], async () => {
       await cdb().comments.where("jobId").equals(job.id).delete();
+      await cdb().profiles.where("jobId").equals(job.id).delete();
       await cdb().tasks.where("jobId").equals(job.id).delete();
       await cdb().captures.where("jobId").equals(job.id).delete();
       await cdb().jobs.delete(job.id);
@@ -703,6 +720,22 @@ function JobView({
             <b>{l.result?.found ?? 0}</b>
             <span>
               {l.listReason === "authored" ? "인물이 쓴 글" : l.listReason === "search" ? "검색 결과에서 찾은 글" : "목록에서 찾은 글"} · {l.status === "succeeded" ? (l.result?.coverage === "unknown" ? "끝 확인 불가" : l.result?.coverage === "partial" ? "일부만 탐색" : "끝") : "찾는 중"}
+            </span>
+          </div>
+        ))}
+        {profileTasks.map((t) => (
+          <div key={t.id} className="stat wide">
+            <b>{t.status === "succeeded" ? `스토리 ${t.result?.stories ?? 0}` : TASK_LABEL[t.status]}</b>
+            <span>
+              {t.result?.title ?? "프로필"}
+              {t.status === "succeeded" ? ` · 사진 ${t.result?.images ?? 0}장 · ` : " · "}
+              {t.status === "succeeded" ? (
+                <button type="button" className="ui-link small" onClick={() => void openProfile(t.id)}>
+                  보관본 보기
+                </button>
+              ) : (
+                t.errorText ?? ""
+              )}
             </span>
           </div>
         ))}
@@ -799,10 +832,10 @@ function JobView({
         >
           이미지 실패 다시
         </button>
-        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || !caps.length} onClick={exportNow}>
+        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || (!caps.length && !profileTasks.some((t) => t.status === "succeeded"))} onClick={exportNow}>
           {job.status === "finished" ? ".afterlog로 저장" : "지금까지 .afterlog로 저장"}
         </button>
-        <button type="button" className="ui-btn" disabled={busy || !caps.length} onClick={exportHtml} title="앱 없이 브라우저에서 바로 보는 HTML(이미지 포함). 고치거나 다시 내보내려면 .afterlog를 쓰세요">
+        <button type="button" className="ui-btn" disabled={busy || (!caps.length && !profileTasks.some((t) => t.status === "succeeded"))} onClick={exportHtml} title="앱 없이 브라우저에서 바로 보는 HTML(이미지 포함). 고치거나 다시 내보내려면 .afterlog를 쓰세요">
           HTML로 저장
         </button>
         <span className="spacer" />

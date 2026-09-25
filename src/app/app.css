@@ -2350,3 +2350,34 @@ hr {
     padding: 5px 8px;
   }
 }
+
+/* 인물 프로필 보관(수집 확장 스냅숏) */
+.profile-snapshots {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.profile-snapshots ul {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.profile-snapshots li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+}
+.profile-snapshot-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+}
+.band-empty-profiles {
+  max-width: 560px;
+  margin: 24px auto 0;
+  padding: 0 16px;
+}

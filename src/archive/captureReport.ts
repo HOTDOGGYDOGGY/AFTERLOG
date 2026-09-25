@@ -36,6 +36,8 @@ export interface CaptureReport {
   };
   /** 이 파일에 든 합계(수집 확장 0.2.1+): 글 수 · 확보한 댓글 수 · 밴드가 표시한 댓글 수 · 인물 댓글 모음 수 */
   totals?: { posts: number; comments: number; commentsShown: number; memberComments: number };
+  /** 인물 프로필 보관본(수집 확장 0.2.4+). 본문은 원문 칸의 band-profile-snapshot HTML */
+  profiles?: { name: string | null; url: string; stories: number; images: number; capturedAt: string }[];
   /** 선택 수집(수집 확장 0.2+): 선택 요약과 인물 댓글 관측 */
   selection?: {
     summary: string;

@@ -46,6 +46,8 @@ export interface Selection {
   search?: SearchSelection | null;
   /** 조건 조합: or 합집합(기본) · and 같은 글에 켜진 글 조건(A·C·D)이 모두 맞을 때만 */
   combine?: "or" | "and";
+  /** 인물 프로필 화면(사진·소개·스토리)도 보관 */
+  profile?: boolean;
 }
 
 export interface SearchSelection {
@@ -121,8 +123,8 @@ export interface Task {
   id: string;
   jobId: string;
   key: string;
-  /** list: 글 목록에서 글 찾기 · comments: 멤버 댓글 목록 읽기(B·C) · post: 글 하나 */
-  kind: "list" | "post" | "comments";
+  /** list: 글 목록에서 글 찾기 · comments: 멤버 댓글 목록 읽기(B·C) · post: 글 하나 · profile: 인물 프로필 화면 보관 */
+  kind: "list" | "post" | "comments" | "profile";
   url: string;
   /** 대상이 된 이유(post). 같은 글이 여러 조건에 걸리면 모두 쌓는다 */
   reasons?: SelectReason[];
@@ -155,6 +157,9 @@ export interface Task {
     userVerified?: boolean;
     /** 이전 저장본 재사용(이번에 다시 열지 않음) */
     reused?: boolean;
+    /** 프로필: 스토리 수 · 이미지 수 */
+    stories?: number;
+    images?: number;
     /** 선택 수집 판정: 맞은 조건 · 검색어 일치 위치 */
     confirmed?: SelectReason[];
     matches?: { where: "body" | "comment"; index: number; terms: string[] }[];
@@ -184,6 +189,27 @@ export interface Capture {
    * notAll 교집합(AND) 밖. 다른 조건으로 대상이 되면 다시 열지 않고 다시 판단한다
    */
   excluded?: "outOfRange" | "noMatch" | "unknown" | "notAll";
+}
+
+/** 인물 프로필 화면 보관본(스냅숏). 화면 구조를 해석하지 않고 보이는 모습 그대로 + 요약(추정) */
+export interface ProfileCapture {
+  id: string;
+  jobId: string;
+  taskId: string;
+  bandNo: string;
+  memberKey: string;
+  url: string;
+  name: string | null;
+  description: string | null;
+  /** 정리된 본문 영역 HTML(스크립트·입력칸 없음, 이미지는 원래 주소) */
+  html: string;
+  /** 페이지 스타일(보관본을 원래 모습으로 보이게) */
+  css: string;
+  cssTruncated: boolean;
+  imageUrls: string[];
+  stories: { date: string; text: string; numbers: number[]; links: string[] }[];
+  capturedAt: string;
+  collectorVersion: string;
 }
 
 export type AssetStatus = "pending" | "stored" | "failed" | "unavailable" | "notRequested" | "unsupported";
@@ -216,6 +242,7 @@ export class CollectorDB extends Dexie {
   assets!: Table<StoredCollectorAsset, string>;
   diag!: Table<DiagRecord, number>;
   comments!: Table<CommentObservation, string>;
+  profiles!: Table<ProfileCapture, string>;
 
   constructor(name = "afterlog-collector") {
     super(name);
@@ -229,6 +256,10 @@ export class CollectorDB extends Dexie {
     // v2: 멤버 댓글 목록 관측(선택 수집 B·C)
     this.version(2).stores({
       comments: "id, jobId, taskId, [jobId+link], [taskId+seq]",
+    });
+    // v3: 인물 프로필 보관본
+    this.version(3).stores({
+      profiles: "id, jobId, taskId, memberKey",
     });
   }
 }

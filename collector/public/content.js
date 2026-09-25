@@ -33,7 +33,7 @@
   var ACTIONS = {
     post: [["post", "이 글 저장", true], ["form", "골라서 저장…"]],
     band: [["list", "이 밴드 글 전체 저장", true], ["form", "골라서 저장…"]],
-    member: [["sel:A", "이 인물의 글", true], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["form", "골라서 저장…"]],
+    member: [["sel:A", "이 인물의 글", true], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["sel:P", "이 프로필 저장"], ["form", "골라서 저장…"]],
     memberComment: [["sel:B", "이 댓글 목록 저장", true], ["sel:BC", "연결된 원글까지"], ["form", "골라서 저장…"]],
     search: [["search", "이 검색 결과 저장", true], ["form", "검색 조건 수정…"]],
   };

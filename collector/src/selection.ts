@@ -47,7 +47,7 @@ export function commentInCapture(ob: Pick<CommentObservation, "text" | "local" |
 /** 선택 내용을 한 문장으로(6절). 이름을 모르면 '선택한 인물' */
 export function describeSelection(sel: Selection): string {
   const parts: string[] = [];
-  const modes = [sel.authored ? "쓴 글" : "", sel.commentsOnly ? "쓴 댓글" : "", sel.commentedPosts ? "댓글 단 글" : ""].filter(Boolean);
+  const modes = [sel.authored ? "쓴 글" : "", sel.commentsOnly ? "쓴 댓글" : "", sel.commentedPosts ? "댓글 단 글" : "", sel.profile ? "프로필" : ""].filter(Boolean);
   if (sel.members.length && modes.length) {
     const who = sel.members.map((m) => m.name).filter(Boolean).join("·") || (sel.members.length > 1 ? `인물 ${sel.members.length}명` : "선택한 인물");
     parts.push(`${who}의 ${modes.join("·")}`);
