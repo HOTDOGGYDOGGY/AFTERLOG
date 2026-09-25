@@ -213,8 +213,13 @@ export interface ViewSettings {
   /** 확보되지 않은 이미지: 자리 표시(기본) 또는 빼기 */
   missingImages: "placeholder" | "omit";
   width: number;
-  /** 꾸미기 설정. 없는 예전 문서는 불러올 때 기존 값에서 채운다 */
+  /** 사용자 스킨(꾸미기 설정). 없는 예전 문서는 불러올 때 기존 값에서 채운다 */
   style?: DocStyle;
+  /**
+   * original = 플랫폼 원형(기본값으로 표시, 사용자 스킨은 그대로 보관) / custom = 사용자 스킨으로 표시.
+   * 원형으로 돌아가도 style을 지우지 않아 언제든 다시 쓸 수 있다(명세 v1.2 27.4 skinFamily).
+   */
+  skinFamily?: "original" | "custom";
 }
 
 /**
@@ -284,5 +289,6 @@ export function defaultViewSettings(): ViewSettings {
     // 실제 밴드 글 상세창 폭
     width: 600,
     style,
+    skinFamily: "original",
   };
 }

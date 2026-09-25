@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as C from "../../editor/commands";
 import type { DocumentData, ReactionSnapshot, ViewSettings } from "../../domain/types";
-import { defaultDocStyle } from "../../domain/style";
 import { BandView } from "../../renderers/band/BandView";
-import type { AppThemeResolved } from "../../renderers/band/style";
+import { effectiveWidth, type AppThemeResolved } from "../../renderers/band/style";
 import { Icon } from "../../components/Icon";
 import { ShellSlot } from "../shell/Shell";
 import { useDocEditor, type SaveStatus } from "../useDocEditor";
@@ -129,7 +128,8 @@ export function DocSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryId, mode === "edit"]);
 
-  const shown = useMemo(() => (compare ? { ...doc, view: { ...doc.view, width: 600, style: { ...defaultDocStyle(), documentTheme: doc.view.style?.documentTheme ?? "app" } } } : doc), [compare, doc]);
+  // 원형과 비교: 누르는 동안만 원형으로 그린다(설정은 바꾸지 않음)
+  const shown = useMemo(() => (compare ? { ...doc, view: { ...doc.view, skinFamily: "original" as const } } : doc), [compare, doc]);
   const reactionEntry = reactions ? doc.entries[reactions] : null;
   const onError = useCallback((text: string) => setNotice({ kind: "error", text }), []);
 
@@ -220,7 +220,7 @@ export function DocSession({
           />
         </div>
       ) : (
-        <div className={`band-stage${mode === "customize" ? " has-design" : ""}`} style={{ ["--detail-w" as string]: `${shown.view.width}px` }}>
+        <div className={`band-stage${mode === "customize" ? " has-design" : ""}`} style={{ ["--detail-w" as string]: `${effectiveWidth(shown.view)}px` }}>
           <div className="band-dim" onClick={onCloseDetail} aria-hidden="true" />
           <div className="band-layer" role="dialog" aria-modal="false" aria-label={`글 상세: ${doc.title}`}>
             {banners}

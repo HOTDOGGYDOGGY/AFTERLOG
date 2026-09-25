@@ -1,4 +1,4 @@
-import { defaultViewSettings, type DocumentData } from "./types";
+import { defaultViewSettings, type DocumentData, type ViewSettings } from "./types";
 import { completeStyle } from "../renderers/band/style";
 
 /**
@@ -9,7 +9,18 @@ export function normalizeDocument(doc: DocumentData): DocumentData {
   const def = defaultViewSettings();
   const merged = { ...def, ...doc.view, sizes: { ...def.sizes, ...doc.view?.sizes }, show: { ...def.show, ...doc.view?.show } };
   // 꾸미기 설정이 없는 예전 문서: 기존 글꼴·크기·테마를 옮겨 채운다(기존 값은 바꾸지 않음)
-  const view = { ...merged, style: completeStyle(doc.view?.style, { ...merged, width: doc.view?.width ?? 640 }), width: doc.view?.width ?? 640 };
+  const view: ViewSettings = { ...merged, style: completeStyle(doc.view?.style, { ...merged, width: doc.view?.width ?? 640 }), width: doc.view?.width ?? 640 };
+  if (!doc.view?.skinFamily) {
+    // 예전(0.2) 문서: 예전 기본값 그대로면 새 원형으로, 사용자가 바꾼 값이 있으면 그 스킨으로 보여 준다
+    const old = doc.view;
+    const untouched =
+      !old?.style &&
+      (old?.theme ?? "light") === "light" &&
+      (old?.fontFamily ?? "system") === "system" &&
+      JSON.stringify(old?.sizes ?? {}) === JSON.stringify({ base: 14, name: 15, desc: 12, body: 15, comment: 14 }) &&
+      (old?.width ?? 640) === 640;
+    view.skinFamily = old?.style ? "custom" : untouched ? "original" : "custom";
+  }
   const entries: DocumentData["entries"] = {};
   let changed = JSON.stringify(view) !== JSON.stringify(doc.view);
   for (const [id, e] of Object.entries(doc.entries)) {

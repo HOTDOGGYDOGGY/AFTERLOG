@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import * as C from "../../editor/commands";
 import type { CommentSkin, DocStyle, DocumentTheme, FontKey, TextRole, ViewSettings } from "../../domain/types";
-import { defaultDocStyle, docStyle, FONT_LABEL, RANGES } from "../../renderers/band/style";
+import { customStyle, defaultDocStyle, FONT_LABEL, isOriginalSkin, RANGES } from "../../renderers/band/style";
 import { Segmented, Slider } from "../../components/Slider";
 import { ColorPicker } from "../../components/ColorPicker";
 import { Icon } from "../../components/Icon";
@@ -32,6 +32,8 @@ interface Preset {
   name: string;
   style: DocStyle;
   width?: number;
+  /** 원형 프리셋: 사용자 스킨은 두고 원형 + 기록 테마만 바꾼다 */
+  original?: boolean;
 }
 
 const PRESET_KEY = "afterlog.stylePresets";
@@ -42,9 +44,9 @@ function builtinPresets(): Preset[] {
   const list: DocStyle = { ...band, commentSkin: "linear", avatar: { ...band.avatar, repeat: "hidden" } };
   const chat: DocStyle = { ...band, commentSkin: "bubble", avatar: { ...band.avatar, repeat: "group" } };
   return [
-    { name: "BAND 원형 · 앱 테마 따름", style: band },
-    { name: "BAND 원형 · 다크", style: dark },
-    { name: "BAND 원형 · 라이트", style: light },
+    { name: "BAND 원형 · 화면 테마 따름", style: band, original: true },
+    { name: "BAND 원형 · 다크", style: dark, original: true },
+    { name: "BAND 원형 · 라이트", style: light, original: true },
     { name: "간결한 목록", style: list },
     { name: "대화형(말풍선)", style: chat },
   ];
@@ -65,7 +67,7 @@ function writePresets(p: Preset[]) {
   }
 }
 
-let clipboardStyle: { style: DocStyle; width: number } | null = null;
+let clipboardStyle: { style: DocStyle; width: number; original: boolean } | null = null;
 
 export function DesignPanel({
   editor,
@@ -84,7 +86,9 @@ export function DesignPanel({
 }) {
   const { doc } = editor;
   const ro = !!editor.readOnly;
-  const st = docStyle(doc.view);
+  // 패널은 보관된 사용자 스킨을 보여 주고 고친다. 원형 보기 중에 값을 바꾸면 사용자 스킨으로 전환된다
+  const st = customStyle(doc.view);
+  const original = isOriginalSkin(doc.view);
   const def = defaultDocStyle();
   const [open, setOpen] = useState<Section>("preset");
   const [q, setQ] = useState("");
@@ -94,8 +98,9 @@ export function DesignPanel({
     editor.apply(
       (d) =>
         C.updateView(d, (v) => {
-          if (!v.style) v.style = docStyle(v as ViewSettings);
+          if (!v.style) v.style = customStyle(v as ViewSettings);
           fn(v.style as DocStyle, v as ViewSettings);
+          v.skinFamily = "custom";
         }),
       key,
     );
@@ -205,6 +210,17 @@ export function DesignPanel({
           원형과 비교
         </button>
       </div>
+      <div className="skin-family" role="radiogroup" aria-label="보기">
+        <button type="button" role="radio" aria-checked={original} disabled={ro} onClick={() => editor.apply((d) => C.updateView(d, (v) => void (v.skinFamily = "original")))}>
+          밴드 원형
+        </button>
+        <button type="button" role="radio" aria-checked={!original} disabled={ro} onClick={() => editor.apply((d) => C.updateView(d, (v) => void (v.skinFamily = "custom")))}>
+          내 스킨
+        </button>
+      </div>
+      <p className="small muted skin-family-note">
+        {original ? "원형으로 보는 중입니다. 아래 값을 바꾸면 '내 스킨'으로 바뀌며, 내 스킨은 원형으로 돌아가도 그대로 보관됩니다." : "내 스킨으로 보는 중입니다. '밴드 원형'을 누르면 언제든 원래 모양으로 돌아가고 내 스킨은 보관됩니다."}
+      </p>
       <div className="panel-body design-body">
         {sec(
           "preset",
@@ -218,8 +234,16 @@ export function DesignPanel({
                     onClick={() =>
                       editor.apply((d) =>
                         C.updateView(d, (v) => {
+                          if (p.original) {
+                            // 원형 프리셋은 보관된 내 스킨을 지우지 않는다
+                            if (!v.style) v.style = customStyle(v as ViewSettings);
+                            v.style.documentTheme = p.style.documentTheme;
+                            v.skinFamily = "original";
+                            return;
+                          }
                           v.style = structuredClone(p.style);
                           if (p.width) v.width = p.width;
+                          v.skinFamily = "custom";
                         }),
                       )
                     }
@@ -262,7 +286,7 @@ export function DesignPanel({
                 type="button"
                 className="ui-btn ui-btn-small"
                 onClick={() => {
-                  clipboardStyle = { style: structuredClone(st), width: doc.view.width };
+                  clipboardStyle = { style: structuredClone(st), width: doc.view.width, original };
                   setMsg("디자인을 복사했습니다. 다른 글을 열고 '붙여넣기'를 누르세요.");
                 }}
               >
@@ -278,6 +302,7 @@ export function DesignPanel({
                     C.updateView(d, (v) => {
                       v.style = structuredClone(clipboardStyle!.style);
                       v.width = clipboardStyle!.width;
+                      v.skinFamily = clipboardStyle!.original ? "original" : "custom";
                     }),
                   )
                 }
@@ -428,9 +453,16 @@ export function DesignPanel({
                 ["dark", "다크"],
                 ["light", "라이트"],
               ]}
-              onChange={(v) => setStyle((s) => void (s.documentTheme = v))}
+              onChange={(v) =>
+                editor.apply((d) =>
+                  C.updateView(d, (vw) => {
+                    if (!vw.style) vw.style = customStyle(vw as ViewSettings);
+                    vw.style.documentTheme = v;
+                  }),
+                )
+              }
             />
-            <p className="small muted">편집기 화면 테마와 별개입니다. '화면 테마 따름'이면 내보낼 때의 화면 테마로 저장됩니다.</p>
+            <p className="small muted">원형·내 스킨 모두에 적용됩니다. 편집기 화면 테마와 별개입니다. '화면 테마 따름'이면 내보낼 때의 화면 테마로 저장됩니다.</p>
             {(
               [
                 ["background", "바깥 배경"],
@@ -489,15 +521,16 @@ export function DesignPanel({
           onClick={() =>
             editor.apply((d) =>
               C.updateView(d, (v) => {
-                const keepTheme = docStyle(v as ViewSettings).documentTheme;
+                // 내 스킨의 모든 값을 기본값으로(기록 테마는 유지). 글·댓글·인물·첨부는 그대로
+                const keepTheme = customStyle(v as ViewSettings).documentTheme;
                 v.style = { ...defaultDocStyle(), documentTheme: keepTheme };
                 v.width = 600;
               }),
             )
           }
-          title="글·댓글·인물·첨부는 바뀌지 않습니다"
+          title="보관된 내 스킨을 기본값으로 되돌립니다. 글·댓글·인물·첨부는 바뀌지 않습니다"
         >
-          원형으로 되돌리기
+          내 스킨 초기화
         </button>
         {otherDocs > 0 ? (
           <button

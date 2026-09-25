@@ -6,7 +6,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { DocumentData } from "../domain/types";
 import { BandView } from "../renderers/band/BandView";
-import { currentAppTheme, type AppThemeResolved } from "../renderers/band/style";
+import { currentAppTheme, effectiveWidth, type AppThemeResolved } from "../renderers/band/style";
 import { safeName } from "./fileName";
 import { usedAssetIds } from "./html";
 
@@ -102,7 +102,7 @@ export async function exportDocumentPng(doc: DocumentData, getBlob: (id: string)
   }
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
-  Object.assign(host.style, { position: "fixed", left: "-100000px", top: "0", width: `${doc.view.width}px`, pointerEvents: "none" });
+  Object.assign(host.style, { position: "fixed", left: "-100000px", top: "0", width: `${effectiveWidth(doc.view)}px`, pointerEvents: "none" });
   document.body.appendChild(host);
   const root = createRoot(host);
   try {
@@ -126,7 +126,7 @@ export async function exportDocumentPng(doc: DocumentData, getBlob: (id: string)
       const p = plan[i];
       const h = p.end - p.start;
       const canvas = await toCanvas(node, {
-        width: doc.view.width,
+        width: effectiveWidth(doc.view),
         height: h,
         pixelRatio: opts.pixelRatio,
         backgroundColor: bg,

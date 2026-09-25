@@ -122,7 +122,7 @@ export function BandModule({
         const cur = await db().documents.get(d.id);
         if (!cur) continue;
         const fresh = normalizeDocument(cur);
-        await saveDocument({ ...fresh, view: { ...fresh.view, style: structuredClone(view.style), width: view.width, show: { ...view.show }, missingImages: view.missingImages } }, fresh.revision);
+        await saveDocument({ ...fresh, view: { ...fresh.view, style: structuredClone(view.style), skinFamily: view.skinFamily, width: view.width, show: { ...view.show }, missingImages: view.missingImages } }, fresh.revision);
       }
       await reload();
     },

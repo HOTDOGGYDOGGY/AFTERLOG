@@ -74,21 +74,3 @@ export function ReactionsView({ docs, onJump }: { docs: DocumentData[]; onJump(d
     </div>
   );
 }
-
-export function ChatView() {
-  return (
-    <div className="side-layout">
-      <section className="side-main">
-        <div className="empty-note">
-          <p>
-            <b>보관된 밴드 채팅이 없습니다.</b>
-          </p>
-          <p className="small muted">
-            밴드 채팅 저장은 아직 지원하지 않습니다. 채팅방 화면의 구조(날짜 구분·첨부·답장·표정·과거 대화 불러오기)를 실제 샘플로 확인한 뒤 수집 확장에 추가합니다. 게시글 댓글 해석기를 채팅에 억지로 쓰지 않습니다.
-          </p>
-          <p className="small muted">필요한 샘플: 채팅방을 연 상태에서 '다른 이름으로 저장'한 페이지(개인 대화는 가상의 내용으로 바꿔도 됩니다), 또는 밴드의 채팅 내보내기 파일.</p>
-        </div>
-      </section>
-    </div>
-  );
-}

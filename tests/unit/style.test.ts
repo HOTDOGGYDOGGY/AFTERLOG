@@ -17,6 +17,7 @@ const urls = new Map([...assetMap.values()].map((id) => [id, `data:image/png;bas
 function styled(fn: (v: ViewSettings) => void): DocumentData {
   return C.updateView(syntheticDoc(assetMap), (v) => {
     if (!v.style) v.style = defaultDocStyle();
+    v.skinFamily = "custom";
     fn(v as ViewSettings);
   });
 }
@@ -65,6 +66,7 @@ describe("스타일 해석", () => {
     for (const skin of ["linear", "bubble", "card", "reading", "band"] as const) {
       const after = C.updateView(before, (v) => {
         v.style = { ...docStyle(v as ViewSettings), commentSkin: skin };
+        v.skinFamily = "custom";
       });
       expect(dataOf(after)).toBe(dataOf(before));
       expect(renderDocumentHtml(after, urls, "light")).toContain(`al-skin-${skin}`);
@@ -106,6 +108,30 @@ describe("스타일 해석", () => {
   });
 });
 
+describe("N05 원형 ↔ 내 스킨", () => {
+  it("원형으로 돌아가도 내 스킨은 보관되고 다시 켜면 그대로", () => {
+    const custom = styled((v) => {
+      v.style!.commentSkin = "bubble";
+      v.style!.avatar.shape = "square";
+      v.width = 720;
+    });
+    const orig = C.updateView(custom, (v) => void (v.skinFamily = "original"));
+    expect(docStyle(orig.view).commentSkin).toBe("band");
+    expect(docStyle(orig.view).avatar.shape).toBe("circle");
+    expect(renderDocumentHtml(orig, urls, "light")).toContain("--al-width:600px");
+    expect(orig.view.style!.commentSkin).toBe("bubble");
+    const back = C.updateView(orig, (v) => void (v.skinFamily = "custom"));
+    expect(docStyle(back.view).commentSkin).toBe("bubble");
+    expect(renderDocumentHtml(back, urls, "light")).toContain("--al-width:720px");
+    expect(dataOf(back)).toBe(dataOf(custom));
+  });
+  it("기록 테마는 원형에서도 사용자 선택을 따른다", () => {
+    const d = C.updateView(syntheticDoc(), (v) => void (v.style!.documentTheme = "light"));
+    expect(d.view.skinFamily).toBe("original");
+    expect(resolveDocTheme(d.view, "dark")).toBe("light");
+  });
+});
+
 describe("U36 예전 표시 설정을 가진 문서", () => {
   it("글꼴·크기·다크 테마를 새 스타일로 옮기고 다른 값은 그대로 둔다", () => {
     const old = syntheticDoc(assetMap);
@@ -120,6 +146,13 @@ describe("U36 예전 표시 설정을 가진 문서", () => {
     expect(loaded.view.show.date).toBe(false);
     expect(loaded.view.missingImages).toBe("omit");
     expect(loaded.entries).toEqual(old.entries);
+    // 바꾼 값이 있던 예전 문서는 그 모양(내 스킨)으로 보인다
+    expect(loaded.view.skinFamily).toBe("custom");
+  });
+  it("예전 기본값 그대로인 문서는 새 원형으로", () => {
+    const old = syntheticDoc();
+    const legacyView = { theme: "light", fontFamily: "system", sizes: { base: 14, name: 15, desc: 12, body: 15, comment: 14 }, linkedSizes: true, show: old.view.show, missingImages: "placeholder", width: 640 };
+    expect(normalizeDocument({ ...old, view: legacyView as unknown as ViewSettings }).view.skinFamily).toBe("original");
   });
   it("예전 기본값(라이트)은 '앱 테마 따름'으로 본다", () => {
     const v = { ...syntheticDoc().view, theme: "light" as const, style: undefined };

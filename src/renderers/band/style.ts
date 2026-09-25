@@ -1,7 +1,7 @@
 // 밴드 기록의 표시 설정 해석기. 편집 미리보기·원형 보기·HTML·PNG가 모두 이 결과를 쓴다(명세 v1.2 17절).
 // 스타일은 DOM inline 값이 아니라 문서의 view.style에 의미 단위로 저장하고, 여기서 CSS 변수와 클래스로 바꾼다.
 import type { CSSProperties } from "react";
-import type { AvatarShape, DocStyle, DocumentData, FontKey, Identity, TextRole, ViewSettings } from "../../domain/types";
+import type { AvatarShape, DocStyle, FontKey, Identity, TextRole, ViewSettings } from "../../domain/types";
 import { defaultDocStyle } from "../../domain/style";
 
 export { defaultDocStyle };
@@ -62,8 +62,28 @@ export function completeStyle(st: Partial<DocStyle> | undefined, view: ViewSetti
   };
 }
 
-export function docStyle(view: ViewSettings): DocStyle {
+/** 원형 보기의 글 폭(실제 밴드 상세창) */
+export const ORIGINAL_WIDTH = 600;
+
+export function isOriginalSkin(view: ViewSettings): boolean {
+  return (view.skinFamily ?? "original") === "original";
+}
+
+/** 보관된 사용자 스킨(꾸미기 패널이 고치는 값) */
+export function customStyle(view: ViewSettings): DocStyle {
   return view.style ?? styleFromLegacy(view);
+}
+
+/** 실제로 그릴 스타일: 원형이면 기본값(기록 테마만 사용자 선택), 아니면 사용자 스킨 */
+export function docStyle(view: ViewSettings): DocStyle {
+  const custom = customStyle(view);
+  if (!isOriginalSkin(view)) return custom;
+  return { ...defaultDocStyle(), documentTheme: custom.documentTheme };
+}
+
+/** 실제로 그릴 글 폭 */
+export function effectiveWidth(view: ViewSettings): number {
+  return isOriginalSkin(view) ? ORIGINAL_WIDTH : view.width;
 }
 
 export type AppThemeResolved = "light" | "dark";
@@ -103,7 +123,7 @@ export function bandRootStyle(view: ViewSettings): CSSProperties {
   const t = st.typography;
   const font = (r: TextRole) => FONT_STACKS[t[r].font ?? "system"];
   const vars: Record<string, string | number> = {
-    "--al-width": px(view.width),
+    "--al-width": px(effectiveWidth(view)),
     "--al-size-base": px(t.comment.size),
     "--al-size-name": px(t.name.size),
     "--al-size-desc": px(t.desc.size),
@@ -150,10 +170,3 @@ export function pageBackground(view: ViewSettings, theme: AppThemeResolved): str
   return theme === "dark" ? "#17191d" : "#f0f1f3";
 }
 
-/** 문서가 원형 기본값과 같은지(꾸미기 표시용) */
-export function isOriginalStyle(doc: DocumentData): boolean {
-  const cur = JSON.stringify(docStyle(doc.view));
-  const def = defaultDocStyle();
-  def.documentTheme = docStyle(doc.view).documentTheme;
-  return cur === JSON.stringify(def);
-}

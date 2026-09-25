@@ -101,6 +101,12 @@ test("밴드 글+댓글: 가져오기부터 복구·내보내기까지", async (
   await expect(layer.locator(".al-post-head .al-avatar")).toHaveClass(/is-circle/);
   await page.keyboard.press("Control+y");
   await expect(layer.locator(".al-post-head .al-avatar")).toHaveClass(/is-rounded/);
+  // N05 원형으로 돌아가도 내 스킨은 보관, 다시 켜면 그대로
+  await design.getByRole("radio", { name: "밴드 원형" }).click();
+  await expect(layer.locator(".al-post-head .al-avatar")).toHaveClass(/is-circle/);
+  await expect(layer.locator(".al-band")).toHaveClass(/al-theme-light/);
+  await design.getByRole("radio", { name: "내 스킨" }).click();
+  await expect(layer.locator(".al-post-head .al-avatar")).toHaveClass(/is-rounded/);
   await waitSaved(page);
 
   // F13 새로고침 후 복원(원형 보기로 다시 열림)

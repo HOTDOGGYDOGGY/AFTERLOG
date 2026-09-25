@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { zipSync } from "fflate";
 import type { DocumentData } from "../../domain/types";
 import { safeName } from "../../exporters/fileName";
-import { docStyle } from "../../renderers/band/style";
+import { docStyle, effectiveWidth } from "../../renderers/band/style";
 import { downloadBlob } from "../download";
 import { Icon } from "../../components/Icon";
 
@@ -150,7 +150,7 @@ export function ExportDialog({
                 <input type="range" min={1000} max={6000} step={250} value={maxH} onChange={(e) => setMaxH(Number(e.target.value))} />
               </label>
               <p className="small muted">
-                긴 기록은 댓글 경계(없으면 줄 경계)에서 나눠 여러 장으로 저장하고 ZIP으로 묶습니다. 폭은 각 글의 설정({[...new Set(targets.map((d) => d.view.width))].join("·")}px). 움직이는
+                긴 기록은 댓글 경계(없으면 줄 경계)에서 나눠 여러 장으로 저장하고 ZIP으로 묶습니다. 폭은 각 글의 설정({[...new Set(targets.map((d) => effectiveWidth(d.view)))].join("·")}px). 움직이는
                 GIF는 첫 장면만 담깁니다(HTML에서는 움직임 유지).
               </p>
             </>

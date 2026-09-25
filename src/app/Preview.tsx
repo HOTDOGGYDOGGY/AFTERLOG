@@ -8,6 +8,7 @@ import { BandView, type BandEditHooks } from "../renderers/band/BandView";
 import { MenuButton, PopupMenu, type MenuItem } from "../components/Menu";
 import type { DocEditor } from "./useDocEditor";
 import { Icon } from "../components/Icon";
+import { effectiveWidth } from "../renderers/band/style";
 
 interface Props {
   editor: DocEditor;
@@ -206,15 +207,16 @@ export function Preview({ editor, assetUrl, selectedId, onSelect, onInsertImage,
   );
 
   const ctxEntry = ctx ? doc.entries[ctx.entryId] : null;
-  const fit = useFitScale(doc.view.width);
+  const width = effectiveWidth(doc.view);
+  const fit = useFitScale(width);
   return (
     <div className="preview-scroll" ref={fit.ref} onClick={() => onSelect(null)}>
       {fit.scale < 1 ? (
         <p className="fit-note small muted" role="status">
-          화면에 맞춰 {Math.round(fit.scale * 100)}%로 보는 중 · 출력 폭 {doc.view.width}px는 그대로
+          화면에 맞춰 {Math.round(fit.scale * 100)}%로 보는 중 · 출력 폭 {width}px는 그대로
         </p>
       ) : null}
-      <div className="preview-page" style={{ width: doc.view.width, zoom: fit.scale < 1 ? fit.scale : undefined }}>
+      <div className="preview-page" style={{ width, zoom: fit.scale < 1 ? fit.scale : undefined }}>
         <BandView doc={doc} mode="edit" appTheme={appTheme} assetUrl={assetUrl} edit={hooks} />
       </div>
       {ctx && ctxEntry ? (

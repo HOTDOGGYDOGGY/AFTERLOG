@@ -902,6 +902,31 @@ hr {
   border: 1px solid var(--line);
   border-radius: 6px;
 }
+.skin-family {
+  display: flex;
+  gap: 0;
+  margin: 10px 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.skin-family button {
+  flex: 1;
+  height: 32px;
+  border: 0;
+  background: var(--panel);
+  cursor: pointer;
+}
+.skin-family button + button {
+  border-left: 1px solid var(--line);
+}
+.skin-family button[aria-checked="true"] {
+  background: var(--selected);
+  font-weight: 600;
+}
+.skin-family-note {
+  margin: 6px 14px 8px;
+}
 .design-body {
   padding: 0;
   gap: 0;
@@ -1195,8 +1220,8 @@ hr {
   border-bottom: 1px solid var(--line);
 }
 .tabs button[role="tab"] {
-  flex: 1;
-  padding: 11px 4px;
+  flex: 1 1 auto;
+  padding: 11px 10px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: none;
