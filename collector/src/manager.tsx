@@ -9,6 +9,7 @@ import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnost
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
 import { parseBandUrl, parseMemberUrl, parsePostUrlList, parseSearchUrl, postKey } from "./urls";
 import { describeSelection } from "./selection";
+import { computeOutcome, computeTotals, followUpText } from "./totals";
 import { blocksToPlainText, parseBandHtml } from "../../src/importers/band/html";
 import "./collector.css";
 
@@ -536,7 +537,7 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
           <li>게시글 본문·작성자·시각·댓글·답글·이미지: 지원 — 저장 페이지 샘플로 구조 확인, 합성 화면에서 통과, 실제 밴드 화면 일부 확인</li>
           <li>글 목록 스크롤로 글 찾기: 지원 — 합성 화면에서 통과, 실제 밴드에서 목록 끝까지 확인</li>
           <li>인물 선택(쓴 글·쓴 댓글·댓글 단 글): 합성 화면에서 통과. 멤버 댓글 목록 구조는 저장 샘플로 확인했지만, 항목을 눌러 원글을 여는 동작은 <b>실제 밴드에서 미검증</b></li>
-          <li>접힌 댓글 자동 펼치기: 미지원. 표시 댓글 수와 비교해 '일부 확보'로 알려 줍니다</li>
+          <li>접힌 댓글 펼치기: '이전 댓글·답글 더보기'류 버튼만 눌러 불러오고, 누를 때마다 읽은 댓글을 누적 저장(화면에서 사라져도 유지). 멈춘 이유를 코드로 남기며, 원인을 확인하지 못한 부족분을 '삭제됨'으로 단정하지 않음</li>
           <li>검색 결과 수집: 사용자가 연 검색 결과 화면에서 글을 찾고 본문에서 검색어를 다시 확인. 실제 밴드 검색 화면 구조는 <b>미검증</b>(자동 검색 입력은 아직 없음)</li>
           <li>조건 교집합(AND): 모든 후보를 찾은 뒤 모든 조건에 든 글만 엶</li>
           <li>인물 프로필: 보이는 모습 그대로 보관(사진·소개·스토리 글·숫자·링크). 화면 구조를 해석하지 않은 보관본이며, 이전 프로필 사진 기록·스토리 댓글은 아직 못 모음(실제 화면 샘플 필요)</li>
@@ -643,10 +644,16 @@ function JobView({
   };
 
   // 수집 합계: 이 작업 파일에 들어가는 글(결과에서 뺀 글 제외)과 그 글들의 댓글, 인물 댓글 모음
-  const kept = caps.filter((c) => !c.excluded);
-  const totalComments = kept.reduce((n, c) => n + (c.commentsFound || 0), 0);
-  const shownComments = kept.reduce((n, c) => n + Math.max(c.commentsShown ?? c.commentsFound ?? 0, c.commentsFound || 0), 0);
-  const keptObs = job.options.selection?.commentsOnly ? obs.filter((o) => o.inRange !== false).length : 0;
+  const totals = computeTotals(
+    caps,
+    obs,
+    job.options.selection,
+    profileTasks.filter((t) => t.status === "succeeded").map((t) => t.url),
+  );
+  const { outcome, followUp } = computeOutcome(tasks, obs, assetStat.failed);
+  const followText = followUpText(followUp);
+  // 내보낼 수 있는 자료가 하나라도 있으면 저장할 수 있다(글이 0개여도 댓글 모음·프로필만으로, 명세 8.1·C07)
+  const exportable = totals.posts > 0 || totals.memberComments > 0 || totals.profiles > 0;
 
   const openProfile = async (taskId: string) => {
     const p = await cdb().profiles.where("taskId").equals(taskId).first();
@@ -667,7 +674,8 @@ function JobView({
   };
 
   const retryFailed = async () => {
-    const failed = posts.filter((t) => t.status === "failed");
+    // 글뿐 아니라 목록·인물 댓글 목록·프로필 탐색의 실패도 다시
+    const failed = tasks.filter((t) => t.status === "failed");
     await cdb().transaction("rw", cdb().tasks, async () => {
       for (const t of failed) await cdb().tasks.update(t.id, { status: "pending", attempts: 0, notBefore: 0, errorCode: null, errorText: null });
     });
@@ -703,17 +711,38 @@ function JobView({
 
       <div className="totals" aria-label="수집 합계">
         <span>
-          저장한 글 <b>{kept.length.toLocaleString()}</b>개
+          저장한 글 <b>{totals.posts.toLocaleString()}</b>개
         </span>
         <span>
-          댓글 <b>{totalComments.toLocaleString()}</b>개{shownComments > totalComments ? <small className="muted"> (밴드 표시 {shownComments.toLocaleString()}개)</small> : null}
+          댓글·답글 <b>{totals.comments.toLocaleString()}</b>개
+          {totals.commentsShown || totals.commentsShownUnknown ? (
+            <small className="muted">
+              {" "}
+              (밴드 표시 {totals.commentsShown.toLocaleString()}개{totals.commentsShownUnknown ? ` + 표시 수 모르는 글 ${totals.commentsShownUnknown}개` : ""})
+            </small>
+          ) : null}
         </span>
-        {keptObs ? (
+        {totals.memberComments ? (
           <span>
-            인물 댓글 모음 <b>{keptObs.toLocaleString()}</b>개
+            인물 댓글 모음 <b>{totals.memberComments.toLocaleString()}</b>개
+            {totals.memberCommentsOnlyInList ? <small className="muted"> (원글에서 확인 안 된 {totals.memberCommentsOnlyInList}개 포함)</small> : null}
+          </span>
+        ) : null}
+        {totals.profiles ? (
+          <span>
+            프로필 <b>{totals.profiles}</b>명
           </span>
         ) : null}
       </div>
+      {totals.commentsOverShown ? (
+        <p className="small muted">표시 수보다 댓글을 많이 저장한 글 {totals.commentsOverShown}개: 표시 수를 본 시각·집계 범위(답글 포함 여부)가 다를 수 있어 확인이 필요합니다. 표시 수는 고치지 않았습니다.</p>
+      ) : null}
+      {job.status === "finished" || !running ? (
+        <p className={`small ${outcome === "complete" ? "muted" : ""}`}>
+          {outcome === "complete" ? "선택 범위 확인 완료" : outcome === "unknownEnd" ? "끝을 확인하지 못한 탐색이 있습니다" : "일부 미확보"}
+          {followText ? ` · 보완 필요: ${followText}` : ""}
+        </p>
+      ) : null}
       <div className="stats">
         {lists.map((l) => (
           <div key={l.id} className="stat wide">
@@ -810,7 +839,7 @@ function JobView({
             {job.status === "queued" ? "시작" : "이어받기"}
           </button>
         )}
-        <button type="button" className="ui-btn" disabled={running || !count("failed")} onClick={retryFailed}>
+        <button type="button" className="ui-btn" disabled={running || !followUp.failed} onClick={retryFailed}>
           실패만 다시
         </button>
         {count("partial") ? (
@@ -832,10 +861,10 @@ function JobView({
         >
           이미지 실패 다시
         </button>
-        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || (!caps.length && !profileTasks.some((t) => t.status === "succeeded"))} onClick={exportNow}>
+        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || !exportable} onClick={exportNow}>
           {job.status === "finished" ? ".afterlog로 저장" : "지금까지 .afterlog로 저장"}
         </button>
-        <button type="button" className="ui-btn" disabled={busy || (!caps.length && !profileTasks.some((t) => t.status === "succeeded"))} onClick={exportHtml} title="앱 없이 브라우저에서 바로 보는 HTML(이미지 포함). 고치거나 다시 내보내려면 .afterlog를 쓰세요">
+        <button type="button" className="ui-btn" disabled={busy || !exportable} onClick={exportHtml} title="앱 없이 브라우저에서 바로 보는 HTML(이미지 포함). 고치거나 다시 내보내려면 .afterlog를 쓰세요">
           HTML로 저장
         </button>
         <span className="spacer" />

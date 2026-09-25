@@ -486,7 +486,8 @@ export function parseBandHtml(html: string): BandPageParseResult {
   const documents: ParsedDocument[] = [];
   const notes: string[] = [];
 
-  const cards = Array.from(doc.querySelectorAll(".cPostCard"));
+  // 프로필 스토리 상세에도 .cPostCard가 붙는다(실제 저장본 확인). 일반 게시글로 해석하지 않는다
+  const cards = Array.from(doc.querySelectorAll(".cPostCard")).filter((c) => !c.closest("[data-viewname^='DProfileStory'], [data-viewname='DProfileView'], [data-viewname='DProfileLayerView']"));
   for (const card of cards) documents.push(parsePostDetail(card));
 
   const memberList = doc.querySelector("[data-viewname='DBandMemberCommentListView']");

@@ -386,3 +386,146 @@ describe("실사용 진단(댓글 228개 중 72개) 회귀: 접힌 댓글 펼치
     expect((await cdb().tasks.where("jobId").equals(job2.id).first())!.status).toBe("pending");
   });
 });
+
+describe("프로필 명세 P0: 댓글 누적(C01~C06)", () => {
+  // 표시 댓글 10개, 화면 8개. 버튼을 누르면 위에 2개가 새로 오고, 가상 목록처럼 아래 2개가 화면에서 사라진다
+  const page = (html = postHtml(1)) =>
+    html.replace(
+      'class="sCommentList _heightDetectAreaForComment">',
+      `class="sCommentList _heightDetectAreaForComment"><button type="button" class="prevComment _prevCommentBtn">이전 댓글 2개 보기</button>`,
+    );
+  async function run(html: string, wire: (w: Window & typeof globalThis) => void) {
+    const dom = new JSDOM(html, { url: "https://band.us/band/1/post/1" });
+    wire(dom.window as unknown as Window & typeof globalThis);
+    const g = globalThis as unknown as Record<string, unknown>;
+    const prev = { document: g.document, location: g.location };
+    g.document = dom.window.document;
+    g.location = dom.window.location;
+    try {
+      return await extractPostInPage({ timeoutMs: 2000, stableMs: 0, probes: [], expandMs: 20_000, expandWaitMs: 400 });
+    } finally {
+      g.document = prev.document;
+      g.location = prev.location;
+    }
+  }
+  const topComments = (w: Window) =>
+    Array.from(w.document.querySelectorAll(".dPostCommentMainView .cComment")).filter((c) => !c.parentElement?.closest(".sReplyList") && !!c.querySelector("._commentContent"));
+  const loadPrev = (w: Window, texts: string[], dropBottom: number) => {
+    const list = topComments(w);
+    const first = list[0];
+    for (const t of texts) {
+      const c = first.cloneNode(true) as Element;
+      c.querySelectorAll(".sReplyList").forEach((x) => x.remove());
+      c.querySelector("._commentContent")!.textContent = t;
+      c.querySelector("time")?.setAttribute("title", `2026년 1월 1일 오전 1:0${texts.indexOf(t)}`);
+      first.parentElement!.insertBefore(c, first);
+    }
+    // 가상 목록: 화면 아래쪽 댓글은 빠진다(답글이 없는 것부터)
+    const plain = topComments(w).filter((c) => !c.querySelector(".sReplyList .cComment"));
+    if (dropBottom > 0) for (const c of plain.slice(-dropBottom)) c.remove();
+  };
+  const parse = async (html: string) => (await import("../../src/importers/band/html")).parseBandHtml(html).documents[0];
+
+  it("C01·C02 화면의 댓글 수가 그대로여도(가상 목록) 서로 다른 댓글을 모두 누적해 저장한다", async () => {
+    const r = await run(page(), (w) => {
+      const btn = w.document.querySelector("._prevCommentBtn")!;
+      btn.addEventListener("click", () =>
+        setTimeout(() => {
+          loadPrev(w, ["펼친 댓글 하나", "펼친 댓글 둘"], 2);
+          btn.remove();
+        }, 30),
+      );
+    });
+    expect(r.ok).toBe(true);
+    expect(r.commentsInDom).toBe(8);
+    expect(r.commentsFound).toBe(10);
+    expect(r.commentsKeptFromEarlier).toBe(2);
+    const doc = await parse(r.html!);
+    const texts = doc.entries.filter((e) => e.kind !== "post").map((e) => e.blocks.map((b) => ("text" in b ? b.text : "")).join(""));
+    expect(texts).toHaveLength(10);
+    expect(texts[0]).toBe("펼친 댓글 하나");
+    // 답글 관계도 유지된다
+    expect(doc.entries.some((e) => e.kind !== "post" && e.parentTempId !== doc.entries[0].tempId)).toBe(true);
+  });
+
+  it("C03 표시 댓글 수가 없어도 '이전 댓글' 버튼이 있으면 펼친다", async () => {
+    const html = page().replace('<span class="count">10</span>', '<span class="count"></span>');
+    const r = await run(html, (w) => {
+      const btn = w.document.querySelector("._prevCommentBtn")!;
+      btn.addEventListener("click", () =>
+        setTimeout(() => {
+          loadPrev(w, ["펼친 댓글 하나"], 0);
+          btn.remove();
+        }, 30),
+      );
+    });
+    expect(r.commentsShown).toBeNull();
+    expect(r.expandClicks).toBe(1);
+    expect(r.commentsFound).toBe(9);
+    expect(r.expandStop).toBe("noButton");
+  });
+
+  it("C04 펼치는 중 게시글 카드가 다시 그려져도 읽어 둔 댓글을 잃지 않는다", async () => {
+    const r = await run(page(), (w) => {
+      const btn = w.document.querySelector("._prevCommentBtn")!;
+      btn.addEventListener("click", () =>
+        setTimeout(() => {
+          loadPrev(w, ["펼친 댓글 하나", "펼친 댓글 둘"], 2);
+          btn.remove();
+          const card = w.document.querySelector(".cPostCard")!;
+          card.replaceWith(card.cloneNode(true));
+        }, 30),
+      );
+    });
+    expect(r.ok).toBe(true);
+    expect(r.cardReplaced).toBeGreaterThanOrEqual(1);
+    expect(r.commentsFound).toBe(10);
+  });
+
+  it("C05 같은 사람이 같은 분에 같은 문장을 두 번 쓰면 둘 다 남는다", async () => {
+    const dom = new JSDOM(postHtml(1));
+    const first = topComments(dom.window as unknown as Window)[0];
+    const twin = first.cloneNode(true) as Element;
+    twin.querySelectorAll(".sReplyList").forEach((x) => x.remove());
+    const solo = first.cloneNode(true) as Element;
+    solo.querySelectorAll(".sReplyList").forEach((x) => x.remove());
+    first.parentElement!.insertBefore(twin, first);
+    first.parentElement!.insertBefore(solo, first);
+    const html = page(dom.serialize()).replace('<span class="count">10</span>', '<span class="count">12</span>');
+    const r = await run(html, (w) => {
+      const btn = w.document.querySelector("._prevCommentBtn")!;
+      btn.addEventListener("click", () => setTimeout(() => (loadPrev(w, ["새 댓글"], 1), btn.remove()), 30));
+    });
+    // 처음 화면 10개(같은 댓글 두 벌 포함) + 새 1개. 화면에서 빠진 1개도 누적본에 남는다
+    expect(r.commentsFound).toBe(11);
+    const doc = await parse(r.html!);
+    const same = doc.entries.filter((e) => e.kind !== "post" && JSON.stringify(e.blocks) === JSON.stringify(doc.entries.find((x) => x.kind !== "post" && x.tempId !== doc.entries[0].tempId && JSON.stringify(x.blocks) === JSON.stringify(e.blocks) && x !== e)?.blocks));
+    expect(same.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("C06 다시 열었을 때 댓글이 적게 보여도 앞서 저장한 더 큰 자료를 지우지 않는다", async () => {
+    const url = "https://band.us/band/1/post/1";
+    const full = postHtml(1).replace('<span class="count">10</span>', '<span class="count">8</span>');
+    let html = full;
+    const job = await createJob({ label: "c06", scope: "post-urls", bandNo: "1", options: { ...DEFAULT_OPTIONS, includeImages: false }, posts: [{ key: "band:1:post:1", url }] });
+    const browser = browserFor({});
+    browser.extractPost = async () => ({ ex: await withDom(html, url, () => extractPostInPage({ timeoutMs: 2000, stableMs: 0, probes: [] })), loadMs: 10 });
+    await new Engine({ browser, ...clock() }).run(job.id);
+    const before = (await cdb().captures.where("jobId").equals(job.id).first())!;
+    expect(before.commentsFound).toBe(8);
+    // 두 번째 관측: 댓글이 3개만 보임
+    const dom = new JSDOM(full);
+    topComments(dom.window as unknown as Window).slice(1).forEach((c) => c.remove());
+    html = dom.serialize();
+    const t = (await cdb().tasks.where("jobId").equals(job.id).first())!;
+    await cdb().tasks.update(t.id, { status: "pending", attempts: 0 });
+    await cdb().jobs.update(job.id, { status: "paused" });
+    await new Engine({ browser, ...clock(200_000) }).run(job.id);
+    const caps = await cdb().captures.where("jobId").equals(job.id).toArray();
+    expect(caps).toHaveLength(1);
+    expect(caps[0].id).toBe(before.id);
+    const t2 = (await cdb().tasks.get(t.id))!;
+    expect(t2.errorCode).toBe("keptEarlier");
+    expect(t2.result?.commentsFound).toBe(8);
+  });
+});

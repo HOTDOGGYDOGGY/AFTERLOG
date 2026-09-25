@@ -10,7 +10,7 @@ import { writeArchive } from "../archive/writer";
 import { ProjectFileError } from "../archive/format";
 
 export { ProjectFileError };
-export const APP_VERSION = "0.3.4";
+export const APP_VERSION = "0.3.5";
 
 /**
  * includeSources=false: 공유용 사본. 원본 HTML/텍스트(로그인 정보·주변 화면이 섞일 수 있음)를 빼고

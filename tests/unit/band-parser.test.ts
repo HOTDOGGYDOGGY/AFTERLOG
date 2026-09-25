@@ -139,3 +139,13 @@ describe("페이지가 아닌 입력", () => {
     expect(r.notes[0]).toContain("찾지 못했습니다");
   });
 });
+
+describe("프로필 스토리 상세(.cPostCard가 붙은 모달)", () => {
+  it("P03 스토리 상세를 일반 게시글로 해석하지 않는다", () => {
+    const html = `<html><body><section data-viewname="DProfileStoryDetailLayerView"><div class="lyPostViewer"><div data-viewname="DProfileStoryDetailView" class="cPostCard">
+      <div class="postWriterInfoWrap"><span class="profileStoryDetailWriterBox"><em>가상인물</em><span>의 스토리</span></span><div class="postListInfoWrap"><time class="time">2024년 9월 27일 오전 9:14</time></div></div>
+      <div class="postMain"><div data-viewname="DProfileStoryDetailCollectionView"><div class="postText"><div class="txtBody">스토리 본문</div></div></div></div>
+    </div></div></section></body></html>`;
+    expect(parseBandHtml(html).documents).toHaveLength(0);
+  });
+});

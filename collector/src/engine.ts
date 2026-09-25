@@ -8,7 +8,7 @@ import { parseKoreanDateTime } from "../../src/importers/band/time";
 import { commentInCapture, describeSelection, judgePost, type PostVerdict } from "./selection";
 import { BrowserError, imageQuality, type CollectorBrowser, type TabRole } from "./browser";
 import { DiagRecorder, pruneDiagnostics } from "./diagnostics/recorder";
-import { countBucket, durationBucket, sizeBucket, type CountBucket, type ProbeId } from "./diagnostics/schema";
+import { countBucket, durationBucket, sizeBucket, type CountBucket, type ErrorCode, type ProbeId } from "./diagnostics/schema";
 import { parseBandUrl, parseMemberUrl, postKey } from "./urls";
 
 export type EngineEvent = { type: "changed"; jobId: string } | { type: "stopped"; jobId: string; reason: string };
@@ -128,11 +128,15 @@ async function addReason(task: Task, reason: SelectReason, job: Job): Promise<Ca
 }
 
 /** 댓글 펼치기 결과 설명 */
+const nowTaskResult = (t: Task | undefined) => t?.result ?? null;
+
 export function expandNote(clicks: number, stop?: string) {
-  if (!clicks) return "펼칠 버튼을 찾지 못함. 삭제·숨김 댓글이 숫자에만 들어 있을 수 있음";
+  // 원인을 확인하지 못한 것은 확정하지 않는다(명세 3.1·3.3: '더보기 없음'만으로 전부 수집·삭제됨이라 쓰지 않음)
+  if (stop === "cardLost") return `'이전 댓글' 펼치기 ${clicks}번 중 게시글 화면이 사라짐. 읽어 둔 댓글은 저장함`;
+  if (!clicks) return "누를 '이전 댓글' 버튼을 찾지 못함(원인 미확인: 화면 구조가 다르거나 표시 수에 보이지 않는 댓글이 포함됐을 수 있음)";
   if (stop === "timeout") return `'이전 댓글' 펼치기 ${clicks}번 뒤 시간 한도에 걸림. '댓글 모자란 글 다시'로 이어서 펼칠 수 있음`;
-  if (stop === "noProgress") return `'이전 댓글' 펼치기 ${clicks}번 뒤 더 눌러도 늘지 않음. 삭제·숨김 댓글일 수 있음`;
-  return `'이전 댓글' 펼치기 ${clicks}번 뒤 더 누를 버튼이 없음. 삭제·숨김 댓글이 숫자에만 들어 있을 수 있음`;
+  if (stop === "noProgress") return `'이전 댓글' 펼치기 ${clicks}번 뒤 더 눌러도 새 댓글이 나오지 않음(원인 미확인)`;
+  return `'이전 댓글' 펼치기 ${clicks}번 뒤 더 누를 버튼이 없음(원인 미확인)`;
 }
 
 /** 요청 사이 대기(명세 8.3: 1.5~3초) */
@@ -856,13 +860,14 @@ export class Engine {
     // 미분류로 보존한 댓글 영역도 화면의 댓글 하나로 센다
     const foundComments = doc.entries.filter((e) => e.kind !== "post").length;
     const countOk = ex.commentsShown === null ? null : ex.commentsShown === foundComments;
-    if (ex.commentsShown !== null && (ex.expandClicks || ex.commentsShown > foundComments))
+    if (ex.expandClicks || (ex.commentsShown !== null && ex.commentsShown > foundComments))
       await diag.event(task.id, {
         stage: "expand",
-        state: ex.commentsShown <= foundComments ? "ok" : "partial",
+        state: ex.commentsShown === null ? "unknown" : ex.commentsShown <= foundComments ? "ok" : "partial",
+        ...(ex.expandStop ? { code: `expand_${ex.expandStop}` as ErrorCode } : {}),
         count: countBucket(ex.expandClicks ?? 0),
         candidates: countBucket(ex.expandCandidates ?? 0),
-        remaining: countBucket(Math.max(0, ex.commentsShown - foundComments)),
+        ...(ex.commentsShown !== null ? { remaining: countBucket(Math.max(0, ex.commentsShown - foundComments)) } : {}),
       });
     await diag.event(task.id, {
       stage: "countCheck",
@@ -905,9 +910,27 @@ export class Engine {
       reasons: task.reasons,
     };
     const partial = countOk === false;
+    let keptEarlier = false;
     try {
       await cdb().transaction("rw", [cdb().captures, cdb().tasks, cdb().jobs], async () => {
-        // 같은 작업 안의 같은 글은 최신 관측 하나로(재시도·재개 시 중복 생성 방지)
+        // 같은 작업 안의 같은 글은 관측 하나로(재시도·재개 시 중복 생성 방지).
+        // 다시 열었을 때 댓글이 더 적게 보이면 앞서 저장한 더 큰 자료를 지우지 않는다(C06). 새 관측은 '최신 확인 못 함'으로 알린다
+        const earlier = await cdb().captures.where("[jobId+key]").equals([job.id, key]).toArray();
+        const best = earlier.sort((a, b) => b.commentsFound - a.commentsFound)[0];
+        if (best && best.commentsFound > foundComments) {
+          const shown = ex.commentsShown ?? best.commentsShown;
+          await cdb().tasks.update(task.id, {
+            status: best.excluded ? "skipped" : shown !== null && shown > best.commentsFound ? "partial" : "succeeded",
+            key,
+            url: best.url,
+            leaseUntil: 0,
+            errorCode: "keptEarlier",
+            errorText: `이번에 다시 열었을 때 댓글이 ${foundComments}개만 보여, 앞서 저장한 ${best.commentsFound}개를 그대로 둡니다(이번 재확인은 최신 상태를 확인하지 못함).`,
+            result: { ...(nowTaskResult(await cdb().tasks.get(task.id)) ?? {}), title: doc.title, commentsShown: shown, commentsFound: best.commentsFound },
+          });
+          keptEarlier = true;
+          return;
+        }
         await cdb().captures.where("[jobId+key]").equals([job.id, key]).delete();
         // 사유는 저장 시점의 과제에서 다시 읽는다(열어 보는 사이 다른 조건이 더해졌을 수 있음)
         const nowTask = await cdb().tasks.get(task.id);
@@ -950,6 +973,10 @@ export class Engine {
       return { ok: false, code: "storageFailed", text: "브라우저 저장 공간에 쓰지 못했습니다(용량 부족 가능). '지금까지 저장'으로 먼저 파일을 받아 주세요.", retry: false };
     }
 
+    if (keptEarlier) {
+      await diag.event(task.id, { stage: "storage", state: "skipped", code: "keptEarlier" });
+      return { ok: true };
+    }
     if (job.options.includeImages && !capture.excluded) {
       // 이미지는 다음 글을 여는 동안 뒤에서 받는다(본문 저장을 막지 않음, 7.1). 너무 쌓이면 잠깐 기다린다
       while (this.assetJobs.size >= 3) await Promise.race([...this.assetJobs]);

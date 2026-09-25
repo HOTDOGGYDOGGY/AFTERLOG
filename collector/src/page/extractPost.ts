@@ -24,8 +24,14 @@ export interface PostExtraction {
   /** 접힌 댓글 펼치기: 누른 횟수 · 처음 찾은 버튼 수 */
   expandClicks?: number;
   expandCandidates?: number;
-  /** 펼치기를 멈춘 이유: 다 받음 · 누를 버튼 없음 · 시간 한도 · 눌러도 늘지 않음 */
-  expandStop?: "done" | "noButton" | "timeout" | "noProgress";
+  /** 펼치기를 멈춘 이유: 다 받음 · 누를 버튼 없음 · 시간 한도 · 눌러도 새 댓글 없음 · 게시글 화면이 사라짐 */
+  expandStop?: "done" | "noButton" | "timeout" | "noProgress" | "cardLost";
+  /** 마지막 화면에 있던 댓글 수(누적한 고유 댓글 수는 commentsFound) */
+  commentsInDom?: number;
+  /** 화면에서 사라졌지만 앞서 읽어 둔 댓글 수(가상 목록 등) */
+  commentsKeptFromEarlier?: number;
+  /** 펼치는 중 게시글 카드가 다시 그려진 횟수 */
+  cardReplaced?: number;
 }
 
 export async function extractPostInPage(opts: {
@@ -156,9 +162,10 @@ export async function extractPostInPage(opts: {
       probeCounts: countProbes(card),
     };
 
-  // ---- 접힌 댓글 펼치기 ----
-  // 표시된 댓글 수보다 화면의 댓글이 적으면 '이전 댓글·답글 더보기' 같은 버튼만 눌러 불러온다(읽기 전용).
+  // ---- 접힌 댓글 펼치기 + 댓글 누적(명세 3.2) ----
+  // 표시된 댓글 수보다 모은 댓글이 적거나 표시 수를 모르면, '이전 댓글·답글 더보기' 같은 버튼만 눌러 불러온다(읽기 전용).
   // 누르는 버튼: 댓글 영역 안, 글자나 클래스가 '이전 댓글/댓글 더보기/답글 N개 보기'류인 것. 답글쓰기·표정·번역·숨기기·신고·메뉴·입력칸은 제외
+  // 매번 화면의 댓글을 읽어 고유 댓글로 누적한다. 화면이 일부만 남기거나(가상 목록) 카드가 다시 그려져도 앞서 읽은 댓글은 잃지 않는다.
   const shownOf = (c: Element) => {
     const raw = txt(c.querySelector(".dPostCountView .comment .count")).replace(/,/g, "");
     return /^\d+$/.test(raw) ? Number(raw) : null;
@@ -167,8 +174,8 @@ export async function extractPostInPage(opts: {
   const CLASS_OK = /prevComment|PrevComment|moreComment|MoreComment|commentMore|CommentMore|prevReply|PrevReply|replyMore|ReplyMore|moreReply|MoreReply|previousComment|PreviousComment/;
   const CLASS_DENY = /mute|Mute|emotion|Emotion|translat|Translat|setting|Setting|submit|Submit|write|Write|delete|Delete|remove|Remove|report|Report|_replyBtn|share|Share|like|Like|menu|Menu|upload|Upload|edit|Edit|sticker|Sticker/;
   const tried = new WeakSet<Element>();
-  const hiddenEl = (el: Element) => {
-    for (let n: Element | null = el; n && n !== card; n = n.parentElement) {
+  const hiddenEl = (el: Element, root: Element) => {
+    for (let n: Element | null = el; n && n !== root; n = n.parentElement) {
       if ((n as HTMLElement).hidden) return true;
       const st = n.ownerDocument?.defaultView?.getComputedStyle(n);
       if (st && (st.display === "none" || st.visibility === "hidden")) return true;
@@ -178,7 +185,7 @@ export async function extractPostInPage(opts: {
   const expanders = (c: Element) => {
     const area = c.querySelector(".dPostCommentMainView") ?? c;
     return Array.from(area.querySelectorAll('button, a, [role="button"]')).filter((el) => {
-      if (tried.has(el) || hiddenEl(el)) return false;
+      if (tried.has(el) || hiddenEl(el, c)) return false;
       if (el.closest('form, textarea, [contenteditable="true"], .commentWrite, .dPostCommentWriteView, ._commentWriteArea, .mentions-input')) return false;
       const cls = (el.getAttribute("class") ?? "") + " " + (el.getAttribute("data-uiselector") ?? "");
       if (CLASS_DENY.test(cls)) return false;
@@ -186,19 +193,148 @@ export async function extractPostInPage(opts: {
       return TEXT_OK.test(t) || (CLASS_OK.test(cls) && t.length <= 40);
     });
   };
+
+  // 누적 저장소. 원본 댓글 ID가 화면에 없어서(실제 저장본 확인) 임시 키 = 부모 키 + 이름·인장 파일·시각(title)·글·첨부 + 같은 화면 안 순번.
+  // 같은 사람이 같은 분에 같은 글을 두 번 쓰면 순번으로 둘 다 남는다(C05). 이름+본문만으로 합치지 않는다.
+  interface AccItem {
+    key: string;
+    parent: string;
+    html: string;
+    size: number;
+  }
+  const acc = new Map<string, AccItem>();
+  const order = new Map<string, string[]>();
+  const fileOf = (u: string | null | undefined) => (u ?? "").split(/[?#]/)[0].split("/").pop() ?? "";
+  const topOf = (c: Element) => {
+    const area = c.querySelector(".dPostCommentMainView");
+    return area ? Array.from(area.querySelectorAll(".cComment")).filter((el) => !el.parentElement?.closest(".sReplyList")) : [];
+  };
+  const repliesOf = (cc: Element) => Array.from(cc.querySelectorAll(".cComment")).filter((el) => el.parentElement?.closest(".sReplyList")?.closest(".cComment") === cc);
+  const baseKey = (cc: Element) => {
+    const item = cc.querySelector(":scope > [data-viewname='DCommentView'] .itemWrap, :scope .itemWrap") ?? cc;
+    const name = txt(item.querySelector(".writeInfo .name")) || item.querySelector(".writeInfo img")?.getAttribute("alt") || "";
+    const face = fileOf(item.querySelector(".writeInfo img")?.getAttribute("src"));
+    const time = item.querySelector("time")?.getAttribute("title") || txt(item.querySelector("time"));
+    const body = item.querySelector(".commentBody") ?? item;
+    const text = txt(body.querySelector(".txt, ._commentContent") ?? body).slice(0, 400);
+    const media = Array.from(body.querySelectorAll("img"))
+      .map((i) => fileOf(i.getAttribute("src")))
+      .join(",");
+    return `${name}|${face}|${time}|${text}|${media}`;
+  };
+  // 이미지 주소는 원본 요소에서 절대 주소로 읽어 둔다(나중에 다시 붙여도 깨지지 않게)
+  const cloneItem = (cc: Element) => {
+    const cl = cc.cloneNode(true) as Element;
+    const oi = Array.from(cc.querySelectorAll("img"));
+    Array.from(cl.querySelectorAll("img")).forEach((img, i) => {
+      const abs = (oi[i] as HTMLImageElement | undefined)?.src || img.getAttribute("src") || "";
+      img.setAttribute("src", abs);
+      img.removeAttribute("srcset");
+    });
+    // 답글은 따로 모으므로 빈 답글 칸만 남긴다
+    cl.querySelectorAll(".sReplyList .cComment").forEach((r) => {
+      if (r.parentElement?.closest(".sReplyList")?.closest(".cComment") === cl) r.remove();
+    });
+    return cl.outerHTML;
+  };
+  // 새 관측 순서를 기존 순서에 끼워 넣는다(보이는 항목끼리의 순서를 따른다)
+  const place = (parent: string, seen: string[]) => {
+    const list = order.get(parent) ?? [];
+    let at = -1;
+    seen.forEach((k, i) => {
+      const j = list.indexOf(k);
+      if (j >= 0) {
+        at = j;
+        return;
+      }
+      let pos: number;
+      if (at >= 0) pos = at + 1;
+      else {
+        const nextKnown = seen.slice(i + 1).find((x) => list.includes(x));
+        pos = nextKnown ? list.indexOf(nextKnown) : list.length;
+      }
+      list.splice(pos, 0, k);
+      at = pos;
+    });
+    order.set(parent, list);
+  };
+  /** 지금 화면의 댓글을 누적. 새 고유 댓글 수 + 내용이 늘어난(전문 보완) 수를 돌려준다 */
+  const absorb = (c: Element) => {
+    let added = 0;
+    let grown = 0;
+    const walk = (els: Element[], parent: string) => {
+      const seenCount = new Map<string, number>();
+      const seen: string[] = [];
+      for (const cc of els) {
+        const b = baseKey(cc);
+        const n = (seenCount.get(b) ?? 0) + 1;
+        seenCount.set(b, n);
+        const key = `${parent}/${b}#${n}`;
+        seen.push(key);
+        const html = cloneItem(cc);
+        const old = acc.get(key);
+        if (!old) {
+          acc.set(key, { key, parent, html, size: html.length });
+          added++;
+        } else if (html.length > old.size) {
+          acc.set(key, { ...old, html, size: html.length });
+          grown++;
+        }
+        walk(repliesOf(cc), key);
+      }
+      place(parent, seen);
+    };
+    walk(topOf(c), "");
+    return { added, grown };
+  };
+  let lastSnapshotKeys = new Set<string>();
+  const snapshotKeys = (c: Element) => {
+    const out = new Set<string>();
+    const walk = (els: Element[], parent: string) => {
+      const seenCount = new Map<string, number>();
+      for (const cc of els) {
+        const b = baseKey(cc);
+        const n = (seenCount.get(b) ?? 0) + 1;
+        seenCount.set(b, n);
+        const key = `${parent}/${b}#${n}`;
+        out.add(key);
+        walk(repliesOf(cc), key);
+      }
+    };
+    walk(topOf(c), "");
+    return out;
+  };
+  // 카드가 다시 그려지면(노드 교체) 같은 글의 카드를 다시 찾는다. 다른 글이면 쓰지 않는다(C04)
+  const refind = (): Element | null => {
+    if (card && card.isConnected) return card;
+    const p = pick();
+    return p.card && !p.ambiguous && p.card.querySelector(".postWriterInfoWrap, .postWriter") ? p.card : null;
+  };
+
   const shown0 = shownOf(card);
   let expandClicks = 0;
   let expandStop: PostExtraction["expandStop"] = undefined;
+  let cardReplaced = 0;
   const expandCandidates = expanders(card).length;
-  const count = () => card.querySelectorAll(".cComment").length;
-  const sigOf = () => `${count()}:${card.innerHTML.length}`;
-  if (shown0 !== null && count() < shown0) {
-    // 댓글이 수백 개면 수십 번 눌러야 한다. 전체 시간 한도는 넉넉히 두고, 늘지 않는 상태가 이어질 때 멈춘다
+  absorb(card);
+  const unique = () => acc.size;
+  const sigOf = (c: Element) => `${c.querySelectorAll(".cComment").length}:${c.innerHTML.length}`;
+  const needMore = () => (shown0 === null ? expanders(card!).length > 0 : unique() < shown0 || expanders(card!).some((b) => /답글/.test(txt(b))));
+  if (needMore()) {
+    // 댓글이 수백 개면 수십 번 눌러야 한다. 전체 시간 한도는 넉넉히 두고, 새 댓글이 없는 상태가 이어질 때 멈춘다
     const until = Date.now() + (opts.expandMs ?? 60_000);
     let stall = 0;
     for (;;) {
-      const found = count();
-      if (found >= shown0) {
+      const c = refind();
+      if (!c) {
+        expandStop = "cardLost";
+        break;
+      }
+      if (c !== card) {
+        card = c;
+        cardReplaced++;
+      }
+      if (shown0 !== null && unique() >= shown0 && !expanders(c).length) {
         expandStop = "done";
         break;
       }
@@ -206,19 +342,20 @@ export async function extractPostInPage(opts: {
         expandStop = "timeout";
         break;
       }
-      const btn = expanders(card)[0] as HTMLElement | undefined;
+      const btn = expanders(c)[0] as HTMLElement | undefined;
       if (!btn) {
-        expandStop = "noButton";
+        expandStop = shown0 !== null && unique() >= shown0 ? "done" : "noButton";
         break;
       }
       if (typeof btn.scrollIntoView === "function") btn.scrollIntoView({ block: "center" });
-      const before = sigOf();
+      const before = sigOf(c);
       btn.click();
       expandClicks++;
       let changed = false;
-      for (const t0 = Date.now(); Date.now() - t0 < (opts.expandWaitMs ?? 8000); ) {
+      for (const t1 = Date.now(); Date.now() - t1 < (opts.expandWaitMs ?? 8000); ) {
         await sleep(150);
-        if (sigOf() !== before) {
+        const cur = refind();
+        if (!cur || cur !== c || sigOf(cur) !== before) {
           changed = true;
           break;
         }
@@ -228,22 +365,36 @@ export async function extractPostInPage(opts: {
         tried.add(btn);
       } else {
         // 불러오기가 끝날 때까지(내용이 0.45초 동안 그대로일 때까지, 최대 4초)
-        let last = sigOf();
+        let last = "";
         let same = 0;
-        for (const t0 = Date.now(); same < 3 && Date.now() - t0 < 4000; ) {
+        for (const t1 = Date.now(); same < 3 && Date.now() - t1 < 4000; ) {
           await sleep(150);
-          const now = sigOf();
+          const cur = refind();
+          const now = cur ? sigOf(cur) : "";
           same = now === last ? same + 1 : 0;
           last = now;
         }
       }
-      if (count() > found) stall = 0;
+      const cur = refind();
+      const got = cur ? absorb(cur) : { added: 0, grown: 0 };
+      // 진행 = 새 고유 댓글 또는 전문 보완. 화면의 개수가 그대로여도 다른 댓글로 바뀌었으면 진행이다(C02)
+      if (got.added || got.grown) stall = 0;
       else if (++stall >= 6) {
         expandStop = "noProgress";
         break;
       }
     }
   }
+  {
+    const c = refind();
+    if (c) {
+      card = c;
+      absorb(c);
+      lastSnapshotKeys = snapshotKeys(c);
+    }
+  }
+  if (!card || !card.isConnected)
+    return { ...base, ok: false, reason: "not-found", message: "댓글을 펼치는 중 게시글 화면이 사라졌습니다(다른 글로 바뀌었거나 닫힘).", waitedMs: Date.now() - t0, probeCounts: {} };
 
   const clone = card.cloneNode(true) as Element;
   // 해석기는 .cPostCard를 게시글 범위로 찾으므로, 작성자 영역으로 찾은 범위에도 같은 표시를 붙인다
@@ -255,6 +406,39 @@ export async function extractPostInPage(opts: {
     img.setAttribute("src", abs);
     img.removeAttribute("srcset");
   });
+  // 화면에서 사라진 댓글이 있으면 누적본으로 댓글 목록을 다시 짠다(마지막 화면이 아니라 누적 자료가 결과, 3.2-6)
+  const lostFromDom = [...acc.keys()].filter((k) => !lastSnapshotKeys.has(k)).length;
+  if (lostFromDom > 0) {
+    const area = clone.querySelector(".dPostCommentMainView");
+    const topList = area ? Array.from(area.querySelectorAll(".sCommentList")).find((l) => !l.parentElement?.closest(".sReplyList")) : null;
+    if (topList) {
+      const make = (html: string) => {
+        const t = document.createElement("template");
+        t.innerHTML = html;
+        return t.content.firstElementChild as Element;
+      };
+      const build = (key: string): Element => {
+        const el = make(acc.get(key)!.html);
+        const kids = order.get(key) ?? [];
+        if (kids.length) {
+          let list = Array.from(el.querySelectorAll(".sReplyList .sCommentList")).find((l) => l.closest(".cComment") === el) ?? null;
+          if (!list) {
+            const wrap = document.createElement("div");
+            wrap.className = "sReplyList";
+            list = document.createElement("div");
+            list.className = "sCommentList";
+            wrap.appendChild(list);
+            el.appendChild(wrap);
+          }
+          for (const k of kids) if (acc.has(k)) list.appendChild(build(k));
+        }
+        return el;
+      };
+      // 댓글 목록 안의 최상위 댓글은 감싼 요소 안에 있어도 모두 뺀 뒤 누적본으로 다시 넣는다
+      topOf(clone).forEach((el) => el.remove());
+      for (const k of order.get("") ?? []) if (acc.has(k)) topList.appendChild(build(k));
+    }
+  }
   // 저장본에서 스크립트와 입력칸(숨은 값 포함)은 뺀다(24.2)
   clone.querySelectorAll("script, noscript, iframe, style, input, textarea, select, form").forEach((el) => el.remove());
   // 이벤트 속성·값 속성·파서가 쓰지 않는 data-* 속성 제거(data-viewname은 댓글 구조 판별에 쓴다)
@@ -273,7 +457,10 @@ export async function extractPostInPage(opts: {
     bandName: txt(document.querySelector(".printInfo .name, .bandName .uriText")) || null,
     html: clone.outerHTML,
     commentsShown: /^\d+$/.test(shownRaw) ? Number(shownRaw) : null,
-    commentsFound: card.querySelectorAll(".cComment").length,
+    commentsFound: acc.size,
+    commentsInDom: card.querySelectorAll(".cComment").length,
+    commentsKeptFromEarlier: lostFromDom,
+    cardReplaced,
     imageUrls,
     accountMarker: face?.src ? face.src.split(/[?#]/)[0].split("/").pop() ?? null : null,
     waitedMs: Date.now() - t0,

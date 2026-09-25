@@ -9,6 +9,7 @@ import { sha256Hex } from "../../src/storage/hash";
 import { COLLECTOR_VERSION } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type Task } from "./db";
 import { describeSelection } from "./selection";
+import { computeOutcome, computeTotals, totalsText } from "./totals";
 import { safeName } from "../../src/exporters/fileName";
 
 export interface ExportedPart {
@@ -17,9 +18,8 @@ export interface ExportedPart {
 }
 
 const UNSUPPORTED = [
-  "접힌 댓글·'이전 댓글' 자동 펼치기 (실제 화면의 버튼 구조 확인 전이라 누르지 않음)",
   "표정 종류별 수·반응자 명단",
-  "인물 프로필·스토리·프로필 댓글",
+  "프로필 사진 이력(실제 화면 표본 없음)",
   "밴드 채팅",
   "동영상·일반 파일 첨부 원본",
 ];
@@ -30,11 +30,9 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
   const posts = tasks.filter((t) => t.kind === "post");
   const lists = tasks.filter((t) => t.kind === "list");
   const failed = posts.filter((t) => t.status === "failed").length;
-  const partial = posts.filter((t) => t.status === "partial").length;
-  const pending = posts.filter((t) => t.status === "pending" || t.status === "inFlight").length;
   const assetsFailed = assets.filter((a) => a!.status === "failed");
-  const unknownEnd = lists.some((l) => l.result?.coverage === "unknown");
-  const outcome: CaptureReport["outcome"] = failed || partial || pending || assetsFailed.length || lists.some((l) => l.result?.coverage === "partial") ? "partial" : unknownEnd ? "unknownEnd" : "complete";
+  const { outcome, followUp } = computeOutcome(tasks, obs, assetsFailed.length);
+  const profileKeys = tasks.filter((t) => t.kind === "profile" && t.status === "succeeded").map((t) => `${t.url}`);
   return {
     collectorVersion: COLLECTOR_VERSION,
     jobId: job.id,
@@ -63,12 +61,8 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
         reasons: t.reasons,
       })),
     },
-    totals: {
-      posts: caps.length,
-      comments: caps.reduce((n, c) => n + (c.commentsFound || 0), 0),
-      commentsShown: caps.reduce((n, c) => n + Math.max(c.commentsShown ?? c.commentsFound ?? 0, c.commentsFound || 0), 0),
-      memberComments: job.options.selection?.commentsOnly ? obs.filter((o) => o.inRange !== false).length : 0,
-    },
+    totals: computeTotals(caps, obs, job.options.selection, profileKeys),
+    followUp,
     selection: job.options.selection
       ? {
           summary: describeSelection(job.options.selection),
@@ -226,7 +220,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;border-bottom:1p
 .muted{opacity:.7;font-size:13px}
 </style></head><body>
 <h1>${escapeHtml(job.bandName ?? job.label)}</h1>
-<p>${t ? `글 ${t.posts}개 · 댓글 ${t.comments}개${t.commentsShown > t.comments ? ` (밴드 표시 ${t.commentsShown}개)` : ""}${t.memberComments ? ` · 인물 댓글 모음 ${t.memberComments}개` : ""}` : ""}</p>
+<p>${t ? escapeHtml(totalsText(t)) : ""}</p>
 <p class="muted">AFTERLOG 수집 확장 v${COLLECTOR_VERSION} · ${new Date(report.exportedAt).toLocaleString()} 저장. 제목을 누르면 그 글이 열립니다. 이 파일들은 인터넷 없이 열립니다. 고치거나 다시 내보내려면 같은 작업의 .afterlog 파일을 AFTERLOG에서 여세요.</p>
 ${profileRows.length ? `<h2>인물 프로필</h2><ul>${profileRows.join("")}</ul>` : ""}
 ${rows.length ? "<h2>글</h2>" : ""}<table><thead><tr><th>#</th><th>글</th><th>댓글</th><th>원래 글</th></tr></thead><tbody>

@@ -59,7 +59,11 @@ test("목록에서 글 찾기 → 순차 수집 → 일부·실패 보고 → .a
   await expect(stat(p, "이미지 실패")).toHaveText("2");
   // 7번 글은 '이전 댓글 보기'를 눌러 14개를 모두 확보, 9번 글은 펼칠 버튼이 없어 일부 확보
   await expect(p.locator("tr.st-partial")).toContainText("12개 중 8개");
-  await expect(p.locator("tr.st-partial")).toContainText("펼칠 버튼을 찾지 못함");
+  await expect(p.locator("tr.st-partial")).toContainText("버튼을 찾지 못함(원인 미확인");
+  // 원인을 확인하지 못한 부족분을 삭제로 단정하지 않는다
+  await expect(p.locator("tr.st-partial")).not.toContainText("삭제");
+  // 합계: 표시 수는 고치지 않고 따로(max로 맞추지 않음)
+  await expect(p.locator(".totals")).toContainText("밴드 표시");
   await expect(p.locator(".totals")).toContainText("저장한 글 21개");
   await expect(p.locator("tr", { hasText: "· 7번 글의" })).toContainText("14 / 14");
   await expect(p.locator("tr.st-failed")).toContainText("게시글을 찾지 못했습니다");
@@ -404,8 +408,10 @@ test("인물 프로필 보관: '이 프로필 저장' → 끝까지 스크롤해
   const chooser = web.waitForEvent("filechooser");
   await web.getByRole("button", { name: /파일 열기 \(\.afterlog\)/ }).click();
   await (await chooser).setFiles(file);
-  await expect(web.locator(".profile-snapshots")).toContainText("인물 프로필 보관 1");
-  await expect(web.locator(".profile-snapshots")).toContainText("다온");
+  // 글 없이 프로필만 있어도 빈 안내 대신 프로필이 가운데에 보인다
+  await expect(web.getByRole("heading", { name: "인물 프로필 보관 1명" })).toBeVisible();
+  await expect(web.locator(".profile-main-bar")).toContainText("다온");
+  await expect(web.frameLocator(".profile-main-frame").locator("body")).toContainText("다온");
   await web.close();
   await mgr.close();
   await band.close();

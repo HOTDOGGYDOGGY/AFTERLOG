@@ -207,6 +207,8 @@ describe("선택 수집 A·B·C", () => {
     expect(everything).not.toContain("본명 좋아요");
     expect(everything).not.toContain("고개를 돌린다");
     expect(report.selection).toMatchObject({ modes: { commentsOnly: true }, comments: { observed: 4, listTextOnly: 4 } });
+    // C07 글 0개여도 댓글 모음은 저장 대상이고 합계에 든다(원글에서 확인 안 된 댓글로)
+    expect(report.totals).toMatchObject({ posts: 0, comments: 4, memberComments: 4, memberCommentsOnlyInList: 4 });
     expect((r.captureReport as typeof report).selection?.comments.observed).toBe(4);
   });
 
