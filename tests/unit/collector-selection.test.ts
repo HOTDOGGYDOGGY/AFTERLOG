@@ -340,3 +340,28 @@ describe("검색 결과(D)·조건 조합", () => {
     expect(Object.keys(comments.entries)).toHaveLength(3);
   });
 });
+
+describe("이전 저장본 재사용도 조건 판정", () => {
+  it("다른 작업에서 저장한 글을 다시 써도 검색어가 없으면 결과에서 뺀다", async () => {
+    // 댓글이 다 있는 글(모자란 저장본은 재사용하지 않으므로)
+    const complete = (fb: FakeBand) => {
+      fb.extractPost = async (t) => {
+        const n = Number(t.url!.match(/post\/(\d+)/)![1]);
+        fb.opened.push(n);
+        const ex = await withDom(postHtml(n).replace('<span class="count">10</span>', '<span class="count">8</span>'), t.url!, () => extractPostInPage({ timeoutMs: 2000, stableMs: 0, probes: [] }));
+        return { ex, loadMs: 10 };
+      };
+      return fb;
+    };
+    const pre = complete(new FakeBand([], [31, 32]));
+    await run(sel({ authored: true }), pre);
+    const b = complete(new FakeBand([], [31, 32]));
+    const SEARCH = `https://band.us/band/${BAND}/search?keyword=31`;
+    const { posts } = await run(sel({ search: { url: SEARCH, keywords: ["31번"], match: "any", exclude: [], fields: "body" } }), b);
+    // 다시 열지 않았고(재사용), 32번은 검색어가 없어 제외, 31번은 일치 위치 기록
+    expect(b.opened).toEqual([]);
+    expect(posts.find((p) => p.key.endsWith(":32"))).toMatchObject({ status: "skipped", errorCode: "noMatch" });
+    const p31 = posts.find((p) => p.key.endsWith(":31"))!;
+    expect(p31.result).toMatchObject({ reused: true, matches: [{ where: "body", index: 0, terms: ["31번"] }] });
+  });
+});

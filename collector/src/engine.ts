@@ -3,7 +3,7 @@
 // 창이 닫히거나 확장이 업데이트되어도 점유(lease)가 끝난 과제는 다시 대기열로 돌아가 이어받는다.
 import { parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
-import { cdb, type Capture, type CommentObservation, type Job, type SelectReason, type Task } from "./db";
+import { cdb, type Capture, type CommentObservation, type Job, type SelectReason, type Selection, type Task } from "./db";
 import { parseKoreanDateTime } from "../../src/importers/band/time";
 import { commentInCapture, describeSelection, judgePost, type PostVerdict } from "./selection";
 import { BrowserError, imageQuality, type CollectorBrowser, type TabRole } from "./browser";
@@ -45,15 +45,27 @@ const INTERRUPTED = { ok: false as const, code: "other", text: "일시정지", r
  * 이전 작업에서 저장한 본문을 이 작업에 다시 쓴다(열지 않음, 7.1-4). 댓글을 다 못 받은(일부) 저장본은 쓰지 않고 다시 연다. 결과에는 '이전 저장본 재사용'으로 남긴다(9절 최신성).
  * 트랜잭션 안에서 부른다. 과제에 넣을 상태 필드를 돌려준다
  */
-async function reuseCapture(before: Capture, jobId: string, taskId: string, key: string, reasons: SelectReason[]): Promise<Partial<Task>> {
-  await cdb().captures.add({ ...before, id: crypto.randomUUID(), jobId, taskId, key, reasons, excluded: undefined, reusedFrom: before.capturedAt });
+async function reuseCapture(before: Capture, jobId: string, taskId: string, key: string, reasons: SelectReason[], sel?: Selection | null): Promise<Partial<Task>> {
+  const doc = parseBandHtml(before.html).documents.find((d) => d.format === "band-post");
+  const title = doc?.title;
+  const reusedNote = `이전 작업에서 저장한 본문을 다시 썼습니다(${before.capturedAt.slice(0, 10)} 저장, 이번에 다시 열지 않음).`;
+  // 선택 수집이면 다시 쓴 본문도 같은 조건으로 판정한다(검색어·기간)
+  const v = sel && doc ? judgePost(doc, reasons, sel, before.commentsShown === null || before.commentsShown <= before.commentsFound) : null;
+  const judged = v ? { confirmed: v.confirmed, matches: v.matches?.map(({ where, index, terms }) => ({ where, index, terms })) } : {};
+  await cdb().captures.add({ ...before, id: crypto.randomUUID(), jobId, taskId, key, reasons, excluded: v && !v.include ? v.excluded : undefined, reusedFrom: before.capturedAt });
+  if (v && !v.include)
+    return {
+      status: "skipped",
+      errorCode: v.excluded,
+      errorText: `${EXCLUDED_TEXT[v.excluded!]} ${reusedNote}`,
+      result: { title, commentsShown: before.commentsShown, commentsFound: before.commentsFound, reused: true, outOfRange: v.excluded === "outOfRange", ...judged },
+    };
   const partial = before.commentsShown !== null && before.commentsShown !== before.commentsFound;
-  const title = parseBandHtml(before.html).documents.find((d) => d.format === "band-post")?.title;
   return {
     status: partial ? "partial" : "succeeded",
     errorCode: "reused",
-    errorText: `이전 작업에서 저장한 본문을 다시 썼습니다(${before.capturedAt.slice(0, 10)} 저장, 이번에 다시 열지 않음).`,
-    result: { title, commentsShown: before.commentsShown, commentsFound: before.commentsFound, reused: true },
+    errorText: reusedNote,
+    result: { title, commentsShown: before.commentsShown, commentsFound: before.commentsFound, reused: true, ...judged },
   };
 }
 
@@ -443,7 +455,7 @@ export class Engine {
             errorText: null,
             leaseUntil: 0,
             notBefore: 0,
-            ...(before ? await reuseCapture(before, job.id, id, key, [reason]) : {}),
+            ...(before ? await reuseCapture(before, job.id, id, key, [reason], job.options.selection) : {}),
           });
           added++;
         }
@@ -671,7 +683,7 @@ export class Engine {
         errorText: null,
         leaseUntil: 0,
         notBefore: 0,
-        ...(before ? await reuseCapture(before, job.id, id, key, [reason]) : {}),
+        ...(before ? await reuseCapture(before, job.id, id, key, [reason], job.options.selection) : {}),
       });
       if (before) reused = before;
     });
@@ -1016,7 +1028,7 @@ export async function createJob(input: {
     for (const t of tasks) {
       // 이전 작업의 저장본이 있으면 다시 열지 않고 쓴다(지금 열린 탭에서 저장하는 경우는 항상 새로 읽음)
       const before = input.options.skipCaptured && t.kind === "post" && t.tabId === undefined ? await findCapture(t.key, job.id, true) : undefined;
-      await cdb().tasks.add({ ...t, ...(before ? await reuseCapture(before, job.id, t.id, t.key, t.reasons ?? []) : {}) });
+      await cdb().tasks.add({ ...t, ...(before ? await reuseCapture(before, job.id, t.id, t.key, t.reasons ?? [], input.options.selection) : {}) });
     }
   });
   return job;
