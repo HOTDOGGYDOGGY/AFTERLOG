@@ -84,29 +84,34 @@ test("목록에서 글 찾기 → 순차 수집 → 일부·실패 보고 → .a
   await (await dl2).saveAs(filePath);
   await expect(p.locator(".notice.ok")).toContainText("글 21개");
 
-  // 웹 앱에서 열기
+  // 웹 앱에서 열기: 여러 글이면 밴드 홈 피드부터
   const web = await ctx.newPage();
   await web.goto("http://localhost:5179/");
-  await web.getByRole("button", { name: "프로젝트" }).click();
+  await web.getByRole("button", { name: /프로젝트 없음/ }).click();
   const chooser = web.waitForEvent("filechooser");
-  await web.getByRole("button", { name: /불러오기/ }).click();
+  await web.getByRole("button", { name: /파일 열기 \(\.afterlog\)/ }).click();
   await (await chooser).setFiles(filePath);
-  await expect(web.locator(".al-post-head .al-name")).toBeVisible();
-  await expect(web.locator(".preview-page")).toContainText("의 첫 줄 대사.");
-  await expect(web.getByRole("tab", { name: "문서 목록" })).toHaveAttribute("aria-selected", "true");
-  await expect(web.locator(".doc-rows li")).toHaveCount(21);
+  await expect(web.locator(".band-card")).toHaveCount(21);
   await web.screenshot({ path: `${OUT}/02-web-imported.png` });
-  // 검색 → 다른 글의 댓글로 이동
+  await web.locator(".band-card-open").first().click();
+  await expect(web.locator(".band-layer")).toContainText("의 첫 줄 대사.");
+  await web.keyboard.press("Escape");
+  // 내용 편집 → 문서 목록 검색 → 다른 글의 댓글로 이동
+  await web.getByRole("button", { name: "내용 편집" }).click();
+  await expect(web.getByRole("tab", { name: "문서", exact: true }).first()).toHaveAttribute("aria-selected", "true");
+  await expect(web.locator(".doc-rows li")).toHaveCount(21);
   await web.getByLabel("문서 검색").fill("3번 글의");
   await web.locator(".hit-list button").first().click();
   await expect(web.locator(".al-entry.is-selected")).toContainText("3번 글의 첫 줄 대사.");
   await web.getByRole("tab", { name: "가져오기·검토" }).click();
   await expect(web.locator(".report")).toContainText("일부 미확보");
   await expect(web.locator(".report")).toContainText("글 22개 중 21개 확보");
-  await web.getByRole("tab", { name: "표정·반응" }).click();
+  await web.getByRole("tab", { name: "표정·반응 목록" }).click();
   await expect(web.getByText("확인된 표정·하트 기록이 없습니다.")).toBeVisible();
   await web.screenshot({ path: `${OUT}/04-web-reactions.png` });
-  await web.getByRole("tab", { name: "채팅" }).click();
+  await web.getByRole("button", { name: "편집 끝내기" }).click();
+  await web.keyboard.press("Escape");
+  await web.locator(".band-chat-empty").click();
   await expect(web.getByText("보관된 밴드 채팅이 없습니다.")).toBeVisible();
   await web.close();
   await p.close();

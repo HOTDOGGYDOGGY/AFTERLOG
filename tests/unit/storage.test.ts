@@ -7,10 +7,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { strToU8, zipSync, unzipSync, strFromU8 } from "fflate";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as C from "../../src/editor/commands";
-import { exportProjectFile, importProjectFile, readProjectFile } from "../../src/exporters/afterlog";
+import { exportProjectFile, importProjectFile, importProjectFiles, readProjectFile } from "../../src/exporters/afterlog";
 import { analyzeFiles, commitImport } from "../../src/importers/importFiles";
 import { db } from "../../src/storage/db";
-import { ConflictError, createProject, getDocuments, listAssets, listSources, saveDocument } from "../../src/storage/repo";
+import { ConflictError, createProject, getDocuments, getModuleState, listAssets, listModuleStates, listSources, purgeProject, putModuleState, saveDocument } from "../../src/storage/repo";
 import { validateDocument } from "../../src/domain/validate";
 import { FIXTURE_DIR } from "./helpers";
 
@@ -22,7 +22,7 @@ function fixtureFiles(): File[] {
 
 async function wipe() {
   const d = db();
-  await Promise.all([d.projects.clear(), d.documents.clear(), d.sources.clear(), d.assets.clear()]);
+  await Promise.all([d.projects.clear(), d.documents.clear(), d.sources.clear(), d.assets.clear(), d.modules.clear()]);
 }
 
 beforeEach(wipe);
@@ -137,5 +137,36 @@ describe(".afterlog 프로젝트 파일", () => {
     await expect(importProjectFile(new Blob([zipSync(broken) as BlobPart]))).rejects.toThrow(/관계 정보가 손상/);
 
     expect(await db().projects.count()).toBe(before);
+  });
+});
+
+describe("U35 기존 도구 상태의 프로젝트 왕복", () => {
+  it("카톡·카페·짓시 상태와 알 수 없는 모듈을 .afterlog에 담아 새 사본으로 복구", async () => {
+    const { p } = await importFixture();
+    const kakao = { text: "[하진] [오후 9:31] 안녕", people: { people: { 하진: { id: "하진", displayName: "하진", avatarDataUrl: "data:image/png;base64,AAAA", color: "#123456" } }, meId: "하진" }, kakaoSettings: { bgColor: "#000000" }, items: [{ type: "msg", text: "고친 말풍선" }] };
+    await putModuleState({ projectId: p.id, moduleId: "kakao", stateVersion: 1, payload: kakao });
+    await putModuleState({ projectId: p.id, moduleId: "zitsi", stateVersion: 1, payload: { items: [{ id: "a", name: "원문", mime: "text/plain", text: "짓시 원문" }] } });
+    await putModuleState({ projectId: p.id, moduleId: "future-tool", stateVersion: 9, payload: { keep: true } });
+    const { files } = await exportProjectFile(p.id);
+    const r = await importProjectFiles(files.map((f) => f.blob));
+    expect(r.project.id).not.toBe(p.id);
+    const restored = await listModuleStates(r.project.id);
+    expect(restored.map((m) => m.moduleId).sort()).toEqual(["future-tool", "kakao", "zitsi"]);
+    expect((await getModuleState(r.project.id, "kakao"))!.payload).toEqual(kakao);
+    expect((await getModuleState(r.project.id, "future-tool"))!.stateVersion).toBe(9);
+    // 원래 프로젝트는 그대로
+    expect((await getModuleState(p.id, "kakao"))!.payload).toEqual(kakao);
+  });
+  it("모듈 상태가 없는 예전 파일도 그대로 열린다", async () => {
+    const { p } = await importFixture();
+    const { files } = await exportProjectFile(p.id);
+    const r = await importProjectFiles(files.map((f) => f.blob));
+    expect(await listModuleStates(r.project.id)).toEqual([]);
+  });
+  it("프로젝트 영구 삭제 때 모듈 상태도 지운다", async () => {
+    const p = await createProject("x");
+    await putModuleState({ projectId: p.id, moduleId: "cafe", stateVersion: 1, payload: {} });
+    await purgeProject(p.id);
+    expect(await listModuleStates(p.id)).toEqual([]);
   });
 });

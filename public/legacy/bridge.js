@@ -148,6 +148,13 @@
     var root = m.watchRoot ? m.watchRoot() : document.body;
     new MutationObserver(markDirty).observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["src", "class", "style"] });
     send({ type: "ready", capabilities: m.capabilities, stateVersion: m.stateVersion });
+    // 도구가 준비되기 전에 이미 입력된 내용이 있으면 저장 대상으로 알린다
+    try {
+      var st = m.snapshot();
+      if (st && st.text) markDirty();
+    } catch (e) {
+      /* 확인 실패는 무시(다음 입력 때 알림) */
+    }
   }
   start();
 })();

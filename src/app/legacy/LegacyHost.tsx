@@ -45,6 +45,8 @@ export function LegacyHost({
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [caps, setCaps] = useState<Capabilities | null>(null);
+  const capsRef = useRef<Capabilities | null>(null);
+  capsRef.current = caps;
   const [stateVersion, setStateVersion] = useState(1);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -55,11 +57,13 @@ export function LegacyHost({
   const pid = useRef(projectId);
   const adopted = useRef<string | null>(null);
   const saving = useRef<Promise<void> | null>(null);
+  const adopting = useRef(false);
+  const blocked = useRef(false);
 
   const post = useCallback(
     (type: string, payload?: unknown): Promise<unknown> => {
       const win = frame.current?.contentWindow;
-      if (!win || !caps) return Promise.reject(new Error("도구가 아직 준비되지 않았습니다."));
+      if (!win || !capsRef.current) return Promise.reject(new Error("도구가 아직 준비되지 않았습니다."));
       const requestId = crypto.randomUUID();
       return new Promise((resolve, reject) => {
         pending.current.set(requestId, { resolve, reject });
@@ -69,14 +73,14 @@ export function LegacyHost({
         }, 60_000);
       });
     },
-    [caps, m.id],
+    [m.id],
   );
 
   /** 지금 상태를 받아 프로젝트에 저장. 실패하면 성공으로 표시하지 않는다 */
   const save = useCallback(async () => {
     window.clearTimeout(timer.current);
     if (saving.current) await saving.current;
-    if (!dirty.current || !caps) return;
+    if (!dirty.current || !capsRef.current || blocked.current) return;
     const run = (async () => {
       setStatus("saving");
       try {
@@ -84,6 +88,7 @@ export function LegacyHost({
         const snapshot = await post("snapshot");
         let id = pid.current;
         if (!id) {
+          adopting.current = true;
           id = await ensureProject();
           adopted.current = id;
           pid.current = id;
@@ -100,9 +105,11 @@ export function LegacyHost({
     saving.current = run;
     await run;
     saving.current = null;
-  }, [caps, post, ensureProject, m.id, stateVersion]);
+  }, [post, ensureProject, m.id, stateVersion]);
+  const saveRef = useRef(save);
+  saveRef.current = save;
 
-  useEffect(() => registerFlush(save), [registerFlush, save]);
+  useEffect(() => registerFlush(() => saveRef.current()), [registerFlush]);
 
   // 모듈 메시지 받기: 출처·보낸 창·규격 확인
   useEffect(() => {
@@ -111,13 +118,14 @@ export function LegacyHost({
       const d = e.data as ChildMsg;
       if (!d || d.protocol !== LEGACY_PROTOCOL || d.moduleId !== m.id) return;
       if (d.type === "ready") {
+        capsRef.current = d.capabilities;
         setCaps(d.capabilities);
         setStateVersion(d.stateVersion);
       } else if (d.type === "dirty") {
         dirty.current = true;
         setStatus("dirty");
         window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(() => void save(), SAVE_DELAY);
+        timer.current = window.setTimeout(() => void saveRef.current(), SAVE_DELAY);
       } else if (d.type === "response") {
         const p = pending.current.get(d.requestId);
         if (!p) return;
@@ -128,16 +136,27 @@ export function LegacyHost({
     };
     window.addEventListener("message", on);
     return () => window.removeEventListener("message", on);
-  }, [m.id, save]);
+  }, [m.id]);
 
-  // 준비되면(또는 프로젝트가 바뀌면) 저장된 상태를 넣는다. 우리가 방금 만든 프로젝트로 옮긴 경우는 다시 넣지 않는다
+  // 준비되면(또는 프로젝트가 바뀌면) 저장된 상태를 넣는다.
+  // - 우리가 저장하면서 만든 프로젝트로 옮긴 경우: 다시 넣지 않는다
+  // - 프로젝트가 없던 중에 다른 곳에서 프로젝트가 생긴 경우: 입력 중인 내용이 있으면 그 프로젝트로 옮겨 저장(지우지 않음)
+  // - 서로 다른 프로젝트로 바꾼 경우: 이전 프로젝트는 App이 먼저 저장했으므로 새 프로젝트의 상태를 넣는다(없으면 빈 도구)
+  const prevPid = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (!caps) return;
-    if (projectId && projectId === adopted.current) {
+    const prev = prevPid.current;
+    prevPid.current = projectId;
+    if (projectId && (projectId === adopted.current || adopting.current)) {
+      adopted.current = projectId;
       pid.current = projectId;
       return;
     }
     pid.current = projectId;
+    if (prev === null && projectId && dirty.current) {
+      void saveRef.current();
+      return;
+    }
     let alive = true;
     void (async () => {
       setStatus("loading");
@@ -145,7 +164,17 @@ export function LegacyHost({
         const stored = projectId ? await getModuleState(projectId, m.id) : undefined;
         if (!alive) return;
         if (stored && stored.stateVersion > stateVersion) {
-          setNote(`이 프로젝트의 ${m.label} 자료는 더 새 버전(상태 ${stored.stateVersion})에서 저장됐습니다. 덮어쓰지 않도록 읽기만 합니다.`);
+          // 더 새 버전이 저장한 자료: 해석하지 않고 덮어쓰지도 않는다
+          blocked.current = true;
+          setNote(`이 프로젝트의 ${m.label} 자료는 더 새 버전(상태 ${stored.stateVersion})에서 저장되어 열지 않았습니다. 자료는 그대로 보관됩니다.`);
+          setStatus("error");
+          return;
+        }
+        blocked.current = false;
+        // 처음 열 때(또는 프로젝트가 없던 중) 저장된 자료가 없으면 도구를 그대로 둔다(그 사이 입력한 내용을 지우지 않음)
+        if (!stored && (prev === undefined || prev === null)) {
+          setStatus(dirty.current ? "dirty" : "empty");
+          return;
         }
         await post("load", stored?.payload ?? null);
         dirty.current = false;

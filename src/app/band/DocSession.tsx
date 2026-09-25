@@ -27,6 +27,7 @@ function isTypingTarget(t: EventTarget | null) {
 
 export function DocSession({
   initial,
+  active,
   docs,
   projectId,
   projectTitle,
@@ -45,6 +46,8 @@ export function DocSession({
   onSaveProjectDefault,
 }: {
   initial: DocumentData;
+  /** 밴드 플랫폼이 보이는 중인지(아니면 단축키·상단 버튼을 등록하지 않음) */
+  active: boolean;
   docs: DocumentData[];
   projectId: string;
   projectTitle: string;
@@ -77,6 +80,7 @@ export function DocSession({
 
   // 단축키: 입력 중에는 브라우저 편집 동작을 그대로 둔다. 이 세션이 활성일 때만 등록된다
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && mode !== "edit" && !reactions && !image && !exportOpen && !sourceOpen && !isTypingTarget(e.target)) {
         if (mode === "customize") setMode("original");
@@ -102,7 +106,7 @@ export function DocSession({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, mode, setMode, onCloseDetail, reactions, image, exportOpen, sourceOpen]);
+  }, [active, editor, mode, setMode, onCloseDetail, reactions, image, exportOpen, sourceOpen]);
 
   // 원형 보기: 이동해 온 댓글로 스크롤하고 잠시 강조, 아니면 이 글에서 읽던 위치
   const scrollKey = `band:post:${doc.id}`;
@@ -129,7 +133,7 @@ export function DocSession({
   const reactionEntry = reactions ? doc.entries[reactions] : null;
   const onError = useCallback((text: string) => setNotice({ kind: "error", text }), []);
 
-  const headerSlots = (
+  const headerSlots = !active ? null : (
     <>
       <ShellSlot name="status">
         <span className={`save-status is-${editor.status}`} role="status" aria-live="polite" title={editor.error ?? undefined}>
@@ -144,15 +148,15 @@ export function DocSession({
           <Icon name="redo" />
         </button>
         <span className="topbar-sep tb-optional" />
-        <button type="button" className="ui-btn ui-btn-quiet tb-optional" aria-pressed={sourceOpen} onClick={() => setSourceOpen(!sourceOpen)} title="가져온 원문 파일과 원래 내용 보기">
+        <button type="button" className="ui-btn ui-btn-quiet tb-optional" aria-pressed={sourceOpen} aria-label="원문 보기" onClick={() => setSourceOpen(!sourceOpen)} title="가져온 원문 파일과 원래 내용 보기">
           <Icon name="source" size={16} />
           <span className="hide-narrow">원문 보기</span>
         </button>
-        <button type="button" className="ui-btn ui-btn-quiet" aria-pressed={mode === "customize"} onClick={() => setMode(mode === "customize" ? "original" : "customize")} title="폰트·인장·댓글 모양·색 바꾸기">
+        <button type="button" className="ui-btn ui-btn-quiet" aria-pressed={mode === "customize"} aria-label="꾸미기" onClick={() => setMode(mode === "customize" ? "original" : "customize")} title="폰트·인장·댓글 모양·색 바꾸기">
           <Icon name="brush" size={16} />
           <span className="hide-narrow">꾸미기</span>
         </button>
-        <button type="button" className="ui-btn ui-btn-quiet" aria-pressed={mode === "edit"} onClick={() => setMode(mode === "edit" ? "original" : "edit")} title="본문·작성자·순서·답글 관계 고치기">
+        <button type="button" className="ui-btn ui-btn-quiet" aria-pressed={mode === "edit"} aria-label={mode === "edit" ? "편집 끝내기" : "내용 편집"} onClick={() => setMode(mode === "edit" ? "original" : "edit")} title="본문·작성자·순서·답글 관계 고치기">
           <Icon name="edit" size={16} />
           <span className="hide-narrow">{mode === "edit" ? "편집 끝내기" : "내용 편집"}</span>
         </button>

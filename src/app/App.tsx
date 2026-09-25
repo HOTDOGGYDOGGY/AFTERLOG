@@ -49,6 +49,9 @@ export function App() {
   // 한 번 연 기존 도구는 숨겨서 유지(같은 창 안의 입력·설정 보존)
   const [visited, setVisited] = useState<Set<PlatformId>>(() => new Set([route.platform]));
   const flushers = useRef(new Set<() => Promise<void>>());
+  // 다른 플랫폼에 다녀와도 밴드에서 보던 화면(글·인물)으로 돌아온다
+  const lastBand = useRef<BandRoute>(route.band);
+  if (route.platform === "band") lastBand.current = route.band;
 
   const registerFlush = useCallback((fn: () => Promise<void>) => {
     flushers.current.add(fn);
@@ -131,7 +134,7 @@ export function App() {
     }
   };
 
-  const setPlatform = (p: PlatformId) => navigate({ platform: p, band: p === "band" ? route.band : { screen: "home" } });
+  const setPlatform = (p: PlatformId) => navigate({ platform: p, band: p === "band" ? lastBand.current : { screen: "home" } });
   const setBandRoute = useCallback((b: BandRoute, opts?: { replace?: boolean }) => navigate({ platform: "band", band: b }, opts), [navigate]);
 
   if (loading) return <div className="boot">불러오는 중…</div>;
@@ -161,14 +164,16 @@ export function App() {
         </div>
       ) : null}
       <div className="module-area">
-        {route.platform === "band" ? (
+        {/* 밴드도 한 번 연 뒤 숨겨서 유지(다른 플랫폼에 다녀와도 편집 중인 글·읽던 위치 보존). 활성일 때만 단축키·상단 버튼 */}
+        {visited.has("band") ? (
           <BandModule
             key={projectId ?? "none"}
+            active={route.platform === "band"}
             projectId={projectId}
             projectTitle={projectTitle}
             docs={docs}
             captureReports={captureReports}
-            route={route.band}
+            route={route.platform === "band" ? route.band : lastBand.current}
             navigate={setBandRoute}
             reload={reloadDocs}
             appTheme={theme.resolved}

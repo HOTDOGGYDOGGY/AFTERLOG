@@ -20,6 +20,7 @@ import { ExportDialog } from "../panels/ExportDialog";
 import type { AppThemeResolved } from "../../renderers/band/style";
 
 export function BandModule({
+  active,
   projectId,
   projectTitle,
   docs,
@@ -31,6 +32,7 @@ export function BandModule({
   appTheme,
   registerFlush,
 }: {
+  active: boolean;
   projectId: string | null;
   projectTitle: string;
   docs: DocumentData[];
@@ -135,7 +137,7 @@ export function BandModule({
     [projectId],
   );
 
-  const importButton = (
+  const importButton = !active ? null : (
     <ShellSlot name="platformTools">
       <button type="button" className="ui-btn ui-btn-quiet" onClick={() => setImportOpen(true)}>
         <Icon name="plus" size={16} /> 가져오기
@@ -169,11 +171,11 @@ export function BandModule({
   // ---------- 자료가 없을 때 ----------
   if (!projectId || docs.length === 0) {
     return (
-      <>
+      <div className="band-module" hidden={!active}>
         {importButton}
         <BandEmpty projectId={projectId} onImported={onImported} />
         {importSheet}
-      </>
+      </div>
     );
   }
 
@@ -181,16 +183,16 @@ export function BandModule({
   const layerOpen = mode !== "edit" && (!!openDoc || !!personRoute || route.screen === "chat");
 
   return (
-    <>
+    <div className="band-module" hidden={!active}>
       {importButton}
-      {!sessionDoc ? (
+      {!sessionDoc && active ? (
         <>
           <ShellSlot name="actions">
-            <button type="button" className="ui-btn ui-btn-quiet" disabled title="글을 열면 그 글의 디자인을 바꿀 수 있습니다">
+            <button type="button" className="ui-btn ui-btn-quiet" disabled aria-label="꾸미기" title="글을 열면 그 글의 디자인을 바꿀 수 있습니다">
               <Icon name="brush" size={16} />
               <span className="hide-narrow">꾸미기</span>
             </button>
-            <button type="button" className="ui-btn ui-btn-quiet" onClick={() => setMode("edit")} title="본문·작성자·순서·답글 관계 고치기">
+            <button type="button" className="ui-btn ui-btn-quiet" aria-label="내용 편집" onClick={() => setMode("edit")} title="본문·작성자·순서·답글 관계 고치기">
               <Icon name="edit" size={16} />
               <span className="hide-narrow">내용 편집</span>
             </button>
@@ -226,6 +228,7 @@ export function BandModule({
           projectId={projectId}
           projectTitle={projectTitle}
           captureReports={captureReports}
+          active={active}
           mode={mode}
           setMode={setMode}
           entryId={route.screen === "post" ? route.entryId : undefined}
@@ -248,7 +251,7 @@ export function BandModule({
             <PersonLayer
               person={personRoute}
               docs={docs}
-              tab={(route.screen === "person" && route.tab) || "posts"}
+              tab={(route.screen === "person" && route.tab) || (personRoute.posts.length || !personRoute.comments.length ? "posts" : "comments")}
               onTab={(t: PersonTab) => navigate({ screen: "person", person: personRoute.key, tab: t }, { replace: true })}
               assetUrl={assets.url}
               appTheme={appTheme}
@@ -258,7 +261,7 @@ export function BandModule({
           <button type="button" className="band-layer-close" aria-label="프로필 닫기" onClick={closeLayer}>
             <Icon name="close" size={26} />
           </button>
-          <EscToClose onClose={closeLayer} />
+          {active ? <EscToClose onClose={closeLayer} /> : null}
         </div>
       ) : null}
 
@@ -279,13 +282,13 @@ export function BandModule({
           <button type="button" className="band-layer-close" aria-label="채팅 닫기" onClick={closeLayer}>
             <Icon name="close" size={26} />
           </button>
-          <EscToClose onClose={closeLayer} />
+          {active ? <EscToClose onClose={closeLayer} /> : null}
         </div>
       ) : null}
 
       {exportOpen ? <ExportDialog doc={null} docs={docs} getBlob={assets.getBlob} appTheme={appTheme} projectTitle={projectTitle} onClose={() => setExportOpen(false)} /> : null}
       {importSheet}
-    </>
+    </div>
   );
 }
 

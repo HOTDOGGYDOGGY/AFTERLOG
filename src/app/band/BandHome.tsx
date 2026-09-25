@@ -234,7 +234,6 @@ function FeedCard({
               <Icon name="smile" size={16} /> {post.reactions!.total ?? "?"}
             </span>
           ) : null}
-          <span className="al-spacer" />
           <span>
             댓글 {found}
             {shown !== undefined && shown !== found ? ` / 표시 ${shown}` : ""}

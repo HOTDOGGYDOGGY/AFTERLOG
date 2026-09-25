@@ -299,7 +299,6 @@ function Post({ ctx, entry }: { ctx: Ctx; entry: Entry }) {
         {show.reactions && (known || shownCount !== undefined) ? (
           <div className="al-counts">
             {known ? <Reactions r={entry.reactions!} /> : null}
-            <span className="al-spacer" />
             {shownCount !== undefined ? <span>댓글 {shownCount}</span> : null}
           </div>
         ) : null}

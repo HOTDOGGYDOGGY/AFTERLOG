@@ -1661,6 +1661,8 @@
             return { el: previewContent, bg, cleanup: () => previewContent.querySelectorAll('.rp-controls').forEach(el => el.style.display = '') };
         }
     };
+    // AFTERLOG: 스크립트가 준비되기 전에 입력된 내용이 있으면 바로 반영(예전 예시 채우기 블록이 하던 첫 렌더링 대신)
+    if (inputArea.value.trim()) setTimeout(() => inputArea.dispatchEvent(new Event('input')), 0);
     function collectStyles() {
         let styles = '';
         for (const sheet of document.styleSheets) {

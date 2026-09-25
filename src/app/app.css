@@ -455,6 +455,13 @@ hr {
 }
 
 /* ---------- 밴드: 홈(피드) ---------- */
+.band-module {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
 .band-home {
   position: absolute;
   inset: 0;
@@ -2179,10 +2186,12 @@ hr {
     display: none;
   }
   /* 작업 패널과 검사 패널은 한 번에 하나만, 덮는 서랍으로 */
+  /* 작업 패널·검사 패널·손잡이가 모두 흐름 밖이라 가운데 하나만 남는다 */
   .workspace,
   .workspace.has-inspector,
+  .workspace.left-collapsed,
   .workspace.left-collapsed.has-inspector {
-    grid-template-columns: 0 0 minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
   .workspace .left-panel {
     position: absolute;

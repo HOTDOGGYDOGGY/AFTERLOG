@@ -21,8 +21,9 @@ export function defaultDocStyle(): DocStyle {
     typography: {
       name: { size: 14, weight: 700 },
       desc: { size: 12 },
-      body: { size: 15, lineHeight: 1.6 },
-      comment: { size: 14, lineHeight: 1.55 },
+      // 실제 밴드 상세 캡처 실측: 본문 약 14px·줄 20px, 댓글 약 13px·줄 19px
+      body: { size: 14, lineHeight: 1.5 },
+      comment: { size: 13, lineHeight: 1.5 },
       meta: { size: 12 },
     },
     colors: { background: null, surface: null, commentSurface: null, text: null, mention: null },
