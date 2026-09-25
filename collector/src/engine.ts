@@ -15,6 +15,8 @@ export interface EngineDeps {
   browser: CollectorBrowser;
   /** 같은 작업이 두 창에서 동시에 돌지 않게(T06). 테스트에서는 바꿔 끼운다 */
   lock?: <T>(name: string, fn: () => Promise<T>) => Promise<T | "busy">;
+  /** lock이 '이 작업을 도는 실행은 하나뿐'을 보장하는가. 보장되면 다른 실행 이름의 점유는 끝난 실행의 잔여물이다 */
+  exclusiveLock?: boolean;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   random?: () => number;
@@ -50,12 +52,16 @@ export class Engine {
   private now: () => number;
   private random: () => number;
   private lock: NonNullable<EngineDeps["lock"]>;
+  private exclusive: boolean;
+  /** 이번 실행의 이름. 과제 점유에 적어 두고, 남의 점유와 구분한다 */
+  private runId = "";
 
   constructor(private deps: EngineDeps) {
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.now = deps.now ?? (() => Date.now());
     this.random = deps.random ?? Math.random;
     this.lock = deps.lock ?? defaultLock;
+    this.exclusive = deps.lock ? !!deps.exclusiveLock : !!(globalThis.navigator as Navigator | undefined)?.locks;
   }
 
   requestStop() {
@@ -71,21 +77,47 @@ export class Engine {
     this.emit(id);
   }
 
-  /** 점유 시간이 지난 과제를 대기열로 되돌린다(T04, D09) */
-  async recoverLeases(jobId: string, diag: DiagRecorder) {
+  /**
+   * 점유가 끝난 과제를 대기열로 되돌린다(T04, D09, C01).
+   * 점유 시간이 지났거나, 잠금이 단독 실행을 보장하는데 다른 실행 이름으로 점유된 과제(창이 닫혀 끝난 실행의 잔여물)가 대상이다.
+   * 되돌린 개수를 돌려준다.
+   */
+  async recoverLeases(jobId: string, diag: DiagRecorder): Promise<number> {
     const now = this.now();
     const stale = await cdb().tasks.where("[jobId+status]").equals([jobId, "inFlight"]).toArray();
+    let n = 0;
     for (const t of stale) {
-      if (t.leaseUntil <= now) {
-        await cdb().tasks.update(t.id, { status: "pending", leaseUntil: 0 });
-        await diag.event(t.id, { stage: "resume", state: "ok", code: "leaseRecovered" });
+      const orphan = this.exclusive && t.leaseOwner !== this.runId;
+      if (t.leaseUntil <= now || orphan) {
+        // 조건을 다시 확인하면서 바꾼다(그 사이 다른 쪽이 끝냈으면 건드리지 않음)
+        const changed = await cdb().tasks
+          .where("id")
+          .equals(t.id)
+          .filter((x) => x.status === "inFlight" && x.leaseOwner === t.leaseOwner)
+          .modify({ status: "pending", leaseUntil: 0, leaseOwner: null });
+        if (changed) {
+          n++;
+          await diag.event(t.id, { stage: "resume", state: "ok", code: "leaseRecovered" });
+        }
       }
     }
+    return n;
+  }
+
+  /** 대기 과제를 점유한다. 이미 다른 쪽이 가져갔으면 false(중복 실행 방지) */
+  private async claim(task: Task): Promise<boolean> {
+    const changed = await cdb().tasks
+      .where("id")
+      .equals(task.id)
+      .filter((x) => x.status === "pending")
+      .modify({ status: "inFlight", leaseUntil: this.now() + LIMITS.leaseMs, leaseOwner: this.runId, attempts: task.attempts + 1 });
+    return changed === 1;
   }
 
   /** 작업 실행. 다른 창에서 이미 돌고 있으면 "busy" */
   async run(jobId: string): Promise<"done" | "paused" | "busy" | "stopped" | "needsUser"> {
     this.stopRequested = false;
+    this.runId = crypto.randomUUID();
     const r = await this.lock(`afterlog-collector-job-${jobId}`, () => this.runLocked(jobId));
     return r;
   }
@@ -115,16 +147,26 @@ export class Engine {
         }
         const task = await this.nextTask(jobId);
         if (!task) {
+          // 완료 판정은 대기(pending)와 점유 중(inFlight)을 모두 본다(C01)
           const waiting = await cdb().tasks.where("[jobId+status]").equals([jobId, "pending"]).count();
           if (waiting) {
             // 재시도 대기 중인 과제가 있다
             await this.sleep(Math.max(MIN_DELAY_MS, 500));
             continue;
           }
+          const held = await cdb().tasks.where("[jobId+status]").equals([jobId, "inFlight"]).toArray();
+          if (held.length) {
+            if (await this.recoverLeases(jobId, diag)) continue;
+            // 아직 유효한 점유: 끝나거나 만료될 때까지 기다렸다가 다시 본다
+            const until = Math.min(...held.map((t) => t.leaseUntil));
+            await this.setJob(jobId, { current: null });
+            await this.sleep(Math.min(Math.max(until - this.now(), 250), 5000));
+            continue;
+          }
           await this.setJob(jobId, { status: "finished", finishedAt: iso(this.now()), current: null });
           return "done";
         }
-        await cdb().tasks.update(task.id, { status: "inFlight", leaseUntil: this.now() + LIMITS.leaseMs, attempts: task.attempts + 1 });
+        if (!(await this.claim(task))) continue;
         await this.setJob(jobId, { current: task.url });
         let outcome: { ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" | "paused" };
         try {
@@ -143,6 +185,7 @@ export class Engine {
           await cdb().tasks.update(task.id, {
             status: outcome.stopJob ? "pending" : canRetry ? "pending" : "failed",
             leaseUntil: 0,
+            leaseOwner: null,
             notBefore: canRetry ? this.now() + backoff : 0,
             errorCode: outcome.code,
             errorText: outcome.text,
@@ -265,6 +308,10 @@ export class Engine {
       if (ex.reason === "multiple") {
         await diag.event(task.id, { stage: "scope", state: "fail", code: "multipleScopes" });
         return { ok: false, code: "multipleScopes", text: ex.message ?? "게시글이 여러 개 보입니다.", retry: false };
+      }
+      if (ex.reason === "timeout") {
+        await diag.event(task.id, { stage: "scope", state: "partial", code: "loadTimeout" });
+        return { ok: false, code: "loadTimeout", text: ex.message ?? "게시글이 제한 시간 안에 준비되지 않았습니다.", retry: true };
       }
       await diag.event(task.id, { stage: "scope", state: "fail", code: "selectorMissing" });
       return { ok: false, code: "selectorMissing", text: ex.message ?? "게시글을 찾지 못했습니다.", retry: true };

@@ -1,19 +1,35 @@
 // 선택 영역의 일반화한 구조 표본(명세 v1.1 20.5). 페이지 안에서 실행된다(자체 완결형).
 // 태그는 허용 목록으로, 역할은 표준 role만, 텍스트는 '있음' 여부만. class/id/속성 원문·주소·글자는 넣지 않는다.
 // 같은 모양의 반복 행은 대표 1개 + 반복 구간으로 줄인다. 깊이 8, 노드 150 상한.
+// 대상 범위(글 카드)를 못 찾으면 main/body로 넓히지 않고 scopeMissing으로 끝낸다(C04).
 
 export function sampleStructureInPage(args: {
-  scope: "postCard" | "main";
+  scope: "postCard";
   probes: [string, string][];
   tags: string[];
   roles: string[];
   maxDepth: number;
   maxNodes: number;
 }) {
-  const root =
-    args.scope === "postCard"
-      ? document.querySelector(".cPostCard") ?? document.querySelector("main, [role=main]") ?? document.body
-      : document.querySelector("main, [role=main]") ?? document.body;
+  // 글 추출과 같은 규칙으로 대상 카드 하나를 고른다(C06). 여러 개인데 못 고르면 범위 없음
+  const targetNo = ((globalThis.location?.pathname ?? "").match(/\/post\/(\d+)/) ?? [])[1] ?? null;
+  const cards = Array.from(document.querySelectorAll(".cPostCard"));
+  let root: Element | null = cards.length === 1 ? cards[0] : null;
+  if (!root && cards.length > 1 && targetNo) {
+    const re = new RegExp(`/post/${targetNo}(?:[/?#]|$)`);
+    for (const sel of ['.postWriterInfoWrap a[href*="/post/"]', 'a[href*="/post/"]']) {
+      const hit = cards.filter((c) => Array.from(c.querySelectorAll(sel)).some((a) => re.test(a.getAttribute("href") || "")));
+      if (hit.length === 1) {
+        root = hit[0];
+        break;
+      }
+    }
+  }
+  if (!root && cards.length > 1) {
+    const inLayer = cards.filter((c) => c.closest('[role="dialog"], [aria-modal="true"], .lyPostViewer, .postViewer, .layerContainerView, .postDetailLayer, ._postDetailLayer'));
+    if (inLayer.length === 1) root = inLayer[0];
+  }
+  if (!root) return { scopeMissing: true as const };
   let counter = 0;
   const probeOf = (el: Element) => args.probes.filter(([, sel]) => {
     try {

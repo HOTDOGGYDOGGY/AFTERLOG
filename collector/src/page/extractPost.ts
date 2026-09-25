@@ -52,39 +52,89 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
   };
   const loginLike = () => /(^|\.)auth\.band\.us$/.test(location.hostname) || /\/login/.test(location.pathname) || !!document.querySelector("input[type=password]");
 
+  // 대상 글 번호(상세 주소에서). 배경 목록과 상세 레이어가 함께 있으면 이 번호로 고른다(C06)
+  const targetNo = (location.pathname.match(/\/post\/(\d+)/) ?? [])[1] ?? null;
+  const linksTo = (c: Element, sel: string) =>
+    Array.from(c.querySelectorAll(sel)).some((a) => new RegExp(`/post/${targetNo}(?:[/?#]|$)`).test(a.getAttribute("href") || ""));
+  const pick = (): { card: Element | null; count: number; ambiguous: boolean } => {
+    const all = Array.from(document.querySelectorAll(".cPostCard"));
+    if (all.length <= 1) return { card: all[0] ?? null, count: all.length, ambiguous: false };
+    if (targetNo) {
+      // 작성자 영역의 글 주소가 가장 강한 근거, 없으면 카드 안 아무 글 주소
+      for (const sel of ['.postWriterInfoWrap a[href*="/post/"]', 'a[href*="/post/"]']) {
+        const hit = all.filter((c) => linksTo(c, sel));
+        if (hit.length === 1) return { card: hit[0], count: all.length, ambiguous: false };
+      }
+    }
+    const inLayer = all.filter((c) => c.closest('[role="dialog"], [aria-modal="true"], .lyPostViewer, .postViewer, .layerContainerView, .postDetailLayer, ._postDetailLayer'));
+    if (inLayer.length === 1) return { card: inLayer[0], count: all.length, ambiguous: false };
+    // 여러 후보 중 임의로 첫 항목을 고르지 않는다
+    return { card: null, count: all.length, ambiguous: true };
+  };
+
   let lastSig = "";
   let stableSince = 0;
   let card: Element | null = null;
+  let cardCount = 0;
+  let ambiguous = false;
+  let hasWriter = false;
+  // 준비 완료 = 작성자 영역이 보이고, 로딩 표시가 없고, 일정 시간 내용이 바뀌지 않음(C02). 카드가 있다는 것만으로는 완료가 아니다
+  let ready = false;
   while (Date.now() - t0 < opts.timeoutMs) {
     if (loginLike()) return { ...base, ok: false, reason: "login", message: "로그인이 필요한 화면입니다.", waitedMs: Date.now() - t0, probeCounts: {} };
-    const cards = document.querySelectorAll(".cPostCard");
-    if (cards.length > 1)
-      return { ...base, ok: false, reason: "multiple", message: `게시글 카드가 ${cards.length}개 보입니다. 대상 글을 하나만 연 상태에서 다시 시도하세요.`, waitedMs: Date.now() - t0, probeCounts: countProbes(document) };
-    card = cards[0] ?? null;
-    if (card && card.querySelector(".postWriterInfoWrap, .postWriter")) {
+    const p = pick();
+    card = p.card;
+    cardCount = p.count;
+    ambiguous = p.ambiguous;
+    hasWriter = !!card?.querySelector(".postWriterInfoWrap, .postWriter");
+    if (card && hasWriter) {
       const n = card.querySelectorAll(".cComment").length;
       const loading = Array.from(card.querySelectorAll(".uLoading, ._loading")).some((el) => (el as HTMLElement).offsetParent !== null);
       const sig = `${n}:${card.innerHTML.length}:${loading}`;
       if (sig !== lastSig) {
         lastSig = sig;
         stableSince = Date.now();
-      } else if (!loading && Date.now() - stableSince >= opts.stableMs) break;
+      } else if (!loading && Date.now() - stableSince >= opts.stableMs) {
+        ready = true;
+        break;
+      }
     }
     await sleep(250);
   }
+  if (ambiguous)
+    return {
+      ...base,
+      ok: false,
+      reason: "multiple",
+      message: `게시글 카드가 ${cardCount}개 보이는데 대상 글을 확실히 고르지 못했습니다. 대상 글 하나만 연 상태에서 다시 시도하세요.`,
+      waitedMs: Date.now() - t0,
+      probeCounts: countProbes(document),
+    };
   if (!card) return { ...base, ok: false, reason: "not-found", message: "게시글을 찾지 못했습니다(삭제·권한 없음·화면 구조 변경 가능).", waitedMs: Date.now() - t0, probeCounts: countProbes(document) };
+  if (!ready)
+    return {
+      ...base,
+      ok: false,
+      reason: "timeout",
+      message: hasWriter ? "게시글 내용이 제한 시간 안에 안정되지 않았습니다(아직 불러오는 중일 수 있음)." : "게시글 카드는 보이지만 작성자 영역이 제한 시간 안에 나타나지 않았습니다.",
+      waitedMs: Date.now() - t0,
+      probeCounts: countProbes(card),
+    };
 
   const clone = card.cloneNode(true) as Element;
-  // 저장본에서 스크립트·이벤트 속성 제거, 이미지 주소는 절대 주소로
-  clone.querySelectorAll("script, noscript, iframe, style").forEach((el) => el.remove());
-  const walker = [clone, ...Array.from(clone.querySelectorAll("*"))];
-  for (const el of walker) for (const a of Array.from(el.attributes)) if (/^on/i.test(a.name)) el.removeAttribute(a.name);
+  // 이미지 주소는 절대 주소로(요소를 지우기 전에, 원본과 순서가 같을 때 맞춘다)
   const origImgs = Array.from(card.querySelectorAll("img"));
   Array.from(clone.querySelectorAll("img")).forEach((img, i) => {
     const abs = (origImgs[i] as HTMLImageElement | undefined)?.src || img.getAttribute("src") || "";
     img.setAttribute("src", abs);
     img.removeAttribute("srcset");
   });
+  // 저장본에서 스크립트와 입력칸(숨은 값 포함)은 뺀다(24.2)
+  clone.querySelectorAll("script, noscript, iframe, style, input, textarea, select, form").forEach((el) => el.remove());
+  // 이벤트 속성·값 속성·파서가 쓰지 않는 data-* 속성 제거(data-viewname은 댓글 구조 판별에 쓴다)
+  for (const el of [clone, ...Array.from(clone.querySelectorAll("*"))])
+    for (const a of Array.from(el.attributes))
+      if (/^on/i.test(a.name) || a.name === "value" || (/^data-/i.test(a.name) && a.name !== "data-viewname")) el.removeAttribute(a.name);
   const imageUrls = Array.from(new Set(Array.from(clone.querySelectorAll("img")).map((i) => i.getAttribute("src") || "").filter((s) => /^https?:/.test(s))));
   const countEl = card.querySelector(".dPostCountView .comment .count");
   const shownRaw = txt(countEl).replace(/,/g, "");

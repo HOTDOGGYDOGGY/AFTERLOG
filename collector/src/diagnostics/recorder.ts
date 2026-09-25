@@ -18,13 +18,17 @@ export class DiagRecorder {
     private enabled: boolean,
   ) {}
 
-  /** 원본 과제 ID 대신 보고서 안에서만 쓰는 번호 */
-  taskNo(taskId: string) {
-    let n = this.taskNos.get(taskId);
-    if (!n) {
-      n = this.taskNos.size + 1;
-      this.taskNos.set(taskId, n);
-    }
+  /**
+   * 원본 과제 ID 대신 보고서 안에서만 쓰는 번호(C03).
+   * 과제 DB에 저장된 작업 내 순서(order)로 정하므로 기록기를 다시 만들어도(중단·재개·업데이트) 같은 과제는 같은 번호,
+   * 다른 과제는 다른 번호다. 주소·원본 ID는 쓰지 않는다. 과제 표에 없는 ID는 0(작업 전체)으로 남긴다.
+   */
+  async taskNo(taskId: string): Promise<number> {
+    const cached = this.taskNos.get(taskId);
+    if (cached !== undefined) return cached;
+    const t = await cdb().tasks.get(taskId);
+    const n = t && t.jobId === this.jobId ? t.order + 1 : 0;
+    this.taskNos.set(taskId, n);
     return n;
   }
 
@@ -36,13 +40,19 @@ export class DiagRecorder {
 
   async event(taskId: string | null, e: Omit<S.DiagEvent, "seq" | "task">) {
     if (!this.enabled) return;
-    const full = validateEvent({ seq: ++this.seq, task: taskId ? this.taskNo(taskId) : 0, ...e });
+    const task = taskId ? await this.taskNo(taskId) : 0;
+    const full = validateEvent({ seq: ++this.seq, task, ...e });
     const rec: Stored = { type: "event", e: full };
     await cdb().diag.add({ jobId: this.jobId, at: Date.now(), event: rec, bytes: JSON.stringify(rec).length });
   }
 
   async structure(s: unknown) {
-    if (!this.enabled || !s) return;
+    if (!this.enabled) return;
+    if (!s || (typeof s === "object" && (s as { scopeMissing?: boolean }).scopeMissing)) {
+      // 대상 범위를 못 찾으면 더 넓은 영역을 표본으로 쓰지 않는다
+      await this.event(null, { stage: "scope", state: "fail", code: "scopeMissing" });
+      return;
+    }
     let node: S.StructNode;
     try {
       node = validateStructure(s);

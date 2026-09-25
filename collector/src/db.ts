@@ -53,6 +53,8 @@ export interface Task {
   errorCode: string | null;
   errorText: string | null;
   leaseUntil: number;
+  /** 점유한 실행의 이름(Engine.run 마다 새로). 예전 과제에는 없다 */
+  leaseOwner?: string | null;
   notBefore: number;
   result?: {
     title?: string;

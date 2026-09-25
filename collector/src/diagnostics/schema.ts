@@ -1,7 +1,8 @@
 // 개발용 진단 스키마 (수집 명세 v1.1 20.4). 허용 목록 방식:
 // 여기에 선언된 키·열거값·구간만 파일에 들어갈 수 있다. 원문·이름·주소·ID·자유 문자열은 들어갈 자리가 없다.
 
-export const DIAG_SCHEMA_VERSION = 1;
+// 2: 개수 구간에 unknown 추가(C05), scopeMissing 오류 코드 추가(C04)
+export const DIAG_SCHEMA_VERSION = 2;
 export const ADAPTER_VERSION = "band-web-1";
 export const PROBE_SUITE_VERSION = "band-post-1";
 
@@ -42,6 +43,7 @@ export const ERROR_CODES = [
   "versionChanged",
   "leaseRecovered",
   "outOfRange",
+  "scopeMissing",
   "other",
 ] as const;
 export const FIELD_KEYS = [
@@ -84,7 +86,8 @@ export const PROBE_IDS = [
   "loading",
   "attachmentImage",
 ] as const;
-export const COUNT_BUCKETS = ["0", "1", "2to5", "6to20", "21to100", "gt100"] as const;
+/** unknown = 확인하지 못함(실제 0과 다르다) */
+export const COUNT_BUCKETS = ["unknown", "0", "1", "2to5", "6to20", "21to100", "gt100"] as const;
 export const DURATION_BUCKETS = ["lt1s", "1to3s", "3to10s", "gt10s"] as const;
 export const SIZE_BUCKETS = ["lt100KB", "100KBto1MB", "1to10MB", "gt10MB"] as const;
 export const MEDIA_KINDS = ["image", "gif", "video", "file", "unknown"] as const;
@@ -218,7 +221,9 @@ export interface DiagnosticFile {
 // ---------- 구간 변환 ----------
 
 export function countBucket(n: number | null | undefined): CountBucket {
-  if (n === null || n === undefined || !Number.isFinite(n) || n <= 0) return "0";
+  // 확인하지 못한 값을 0개로 보이게 하지 않는다(C05)
+  if (n === null || n === undefined || !Number.isFinite(n) || n < 0) return "unknown";
+  if (n === 0) return "0";
   if (n === 1) return "1";
   if (n <= 5) return "2to5";
   if (n <= 20) return "6to20";

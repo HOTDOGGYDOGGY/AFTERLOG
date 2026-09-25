@@ -351,6 +351,7 @@ function JobView({
         <span className={`badge st-${running ? "running" : stale ? "stale" : job.status}`}>{running ? "수집 중" : stale ? "중단됨" : STATUS_LABEL[job.status]}</span>
       </div>
       {job.pauseReason ? <p className="notice warn">{job.pauseReason}</p> : null}
+      {running ? <p className="notice">수집은 이 관리 창에서 진행됩니다. 창을 닫으면 멈추며, 다시 열어 '이어받기'를 누르면 남은 글부터 계속합니다.</p> : null}
       {stale ? <p className="notice warn">창이 닫혀 수집이 중단됐습니다. 이미 모은 글은 남아 있습니다. '이어받기'로 계속하세요.</p> : null}
       {job.lastRunVersion && job.lastRunVersion !== COLLECTOR_VERSION ? (
         <p className="notice">확장이 v{job.lastRunVersion}에서 v{COLLECTOR_VERSION}로 업데이트됐습니다. 이어받으면 저장된 주소부터 새 버전으로 계속하며, 이미 모은 글은 그대로 둡니다.</p>
