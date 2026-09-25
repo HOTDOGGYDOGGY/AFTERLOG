@@ -1,6 +1,10 @@
 // 수집 엔진이 브라우저를 다루는 경계. 실제 구현(chrome API)과 테스트용 가짜를 바꿔 끼운다.
 import type { PostExtraction } from "./page/extractPost";
 import type { DiscoverRound } from "./page/discoverLinks";
+import type { MemberCommentsRound, OpenCommentPostResult } from "./page/memberComments";
+
+/** 수집 탭의 역할: 목록·댓글 목록 탐색 / 글 열기 */
+export type TabRole = "discover" | "body";
 
 export class BrowserError extends Error {
   constructor(
@@ -25,6 +29,10 @@ export interface CollectorBrowser {
   /** 목록 화면을 열고 회차마다 onRound를 부른다. false를 돌려주면 멈춘다 */
   openList(url: string): Promise<void>;
   discoverRound(bandNo: string): Promise<DiscoverRound>;
+  /** 멤버 댓글 목록(탐색 탭): from 이후 항목 읽기, scroll이면 먼저 끝까지 내려 더 불러온다 */
+  readMemberComments?(opts: { from: number; scroll: boolean }): Promise<MemberCommentsRound>;
+  /** 멤버 댓글 목록 항목을 눌러 원글 번호를 읽고 닫는다(탐색 탭) */
+  openCommentPost?(opts: { seq: number; expectText: string; expectDate: string; bandNo: string }): Promise<OpenCommentPostResult>;
   /** 실패한 화면의 구조 표본(진단용) */
   sampleStructure(target: { url?: string; tabId?: number }): Promise<unknown>;
   fetchAsset(url: string): Promise<FetchedAsset>;

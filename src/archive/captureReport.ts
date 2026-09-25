@@ -23,7 +23,34 @@ export interface CaptureReport {
     failed: number;
     skipped: number;
     outOfRange: number;
-    items: { url: string; status: string; title?: string; comments?: { shown: number | null; found: number }; error?: string; capturedAt?: string }[];
+    items: {
+      url: string;
+      status: string;
+      title?: string;
+      comments?: { shown: number | null; found: number };
+      error?: string;
+      capturedAt?: string;
+      /** 선택 수집: 대상이 된 이유(authored 쓴 글 · commented 댓글 단 글 · search 검색 · list 목록 · url 주소) */
+      reasons?: string[];
+    }[];
+  };
+  /** 선택 수집(수집 확장 0.2+): 선택 요약과 인물 댓글 관측 */
+  selection?: {
+    summary: string;
+    modes: { authored: boolean; commentsOnly: boolean; commentedPosts: boolean };
+    period: { from: string | null; to: string | null; basis: string };
+    members: { bandNo: string; name: string | null }[];
+    comments: {
+      observed: number;
+      inRange: number;
+      dateUnknown: number;
+      linked: number;
+      linkFailed: number;
+      /** 원글의 댓글과 대조해 같음을 확인 */
+      verified: number;
+      /** 목록 표시 그대로(전문 여부 미확인) */
+      listTextOnly: number;
+    };
   };
   assets: { stored: number; thumbnailOnly: number; failed: number; notRequested: number; failures: { url: string; reason: string }[] };
   unsupported: string[];

@@ -227,7 +227,7 @@ describe("수집 엔진", () => {
     expect(tasks.filter((t) => t.kind === "post").map((t) => t.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
   });
 
-  it("기간 밖 글은 저장하지 않고 '건너뜀', 이미 저장한 글은 다음 작업에서 건너뜀", async () => {
+  it("기간 밖 글은 저장하지 않고 '건너뜀', 이미 저장한 글은 다음 작업에서 다시 열지 않고 저장본 재사용", async () => {
     const b = new FakeBrowser();
     b.pages.set("https://band.us/band/424242/post/1", () => secretPostHtml(1, { shown: 8, time: "2025년 1월 1일 오전 1:00" }));
     b.pages.set("https://band.us/band/424242/post/2", () => secretPostHtml(2, { shown: 8 }));
@@ -238,7 +238,10 @@ describe("수집 엔진", () => {
     expect(ts.map((t) => t.status)).toEqual(["skipped", "succeeded"]);
     const job2 = await createJob({ scope: "post-urls", label: "t2", options: DEFAULT_OPTIONS, bandNo: "424242", posts });
     const ts2 = await cdb().tasks.where("jobId").equals(job2.id).sortBy("order");
-    expect(ts2.map((t) => t.status)).toEqual(["pending", "skipped"]);
+    expect(ts2.map((t) => t.status)).toEqual(["pending", "succeeded"]);
+    expect(ts2[1].result?.reused).toBe(true);
+    // 재사용한 본문은 이 작업의 파일에도 들어간다
+    expect((await cdb().captures.where("jobId").equals(job2.id).toArray()).map((c) => c.key)).toEqual(["band:424242:post:2"]);
   });
 });
 

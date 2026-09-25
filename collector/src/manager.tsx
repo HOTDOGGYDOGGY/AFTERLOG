@@ -2,12 +2,13 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "r
 import { createRoot } from "react-dom/client";
 import { ChromeBrowser } from "./chromeBrowser";
 import { COLLECTOR_VERSION } from "./config";
-import { cdb, type Capture, type Job, type Task } from "./db";
+import { cdb, type Capture, type CommentObservation, type Job, type SelectedMember, type SelectReason, type Selection, type Task } from "./db";
 import { createJob, DEFAULT_OPTIONS, Engine } from "./engine";
 import { exportJob } from "./exporter";
 import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnostics/recorder";
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
-import { parseBandUrl, parsePostUrlList, postKey } from "./urls";
+import { parseBandUrl, parseMemberUrl, parsePostUrlList, postKey } from "./urls";
+import { describeSelection } from "./selection";
 import { blocksToPlainText, parseBandHtml } from "../../src/importers/band/html";
 import "./collector.css";
 
@@ -39,11 +40,24 @@ function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(u), 30_000);
 }
 
+/** 선택 수집은 선택 요약, 나머지는 밴드 이름 */
+function jobTitle(j: Job) {
+  return j.scope === "selection" ? j.label : j.bandName ?? j.label;
+}
+
+function fmtDuration(ms: number) {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "1분 미만";
+  return m >= 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m}분`;
+}
+
 function Manager() {
   const params = new URLSearchParams(location.search);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [sel, setSel] = useState<string | null>(params.get("job"));
   const [creating, setCreating] = useState(!params.get("job"));
+  // 밴드 화면 저장 막대의 '골라서 저장…': 이 밴드(또는 멤버) 목록 주소를 채운 새 수집 화면
+  const [formUrl] = useState(() => (params.get("new") === "form" ? params.get("url") : null));
   const [runningHere, setRunningHere] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -95,10 +109,11 @@ function Manager() {
       return;
     }
     const kind = params.get("new");
-    if (kind !== "post" && kind !== "list") return;
+    if (kind === "form") history.replaceState(null, "", location.pathname);
+    if (kind !== "post" && kind !== "list" && kind !== "sel") return;
     autostarted.current = true;
     void (async () => {
-      const created = await jobFromPage(kind, params.get("url") ?? "", Number(params.get("tabId")) || undefined);
+      const created = await jobFromPage(kind, params.get("url") ?? "", Number(params.get("tabId")) || undefined, params.get("modes") ?? "");
       if ("error" in created) {
         history.replaceState(null, "", location.pathname);
         setMessage({ kind: "error", text: created.error });
@@ -141,7 +156,7 @@ function Manager() {
                     setCreating(false);
                   }}
                 >
-                  <span className="ellipsis">{j.bandName ?? j.label}</span>
+                  <span className="ellipsis">{jobTitle(j)}</span>
                   <small className={`badge st-${runningHere === j.id ? "running" : j.status === "running" ? "stale" : j.status}`}>
                     {runningHere === j.id ? "수집 중" : j.status === "running" ? "중단됨" : STATUS_LABEL[j.status]}
                   </small>
@@ -155,6 +170,7 @@ function Manager() {
           {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
           {creating || !job ? (
             <NewJob
+              initialListUrl={formUrl}
               onCreated={async (id) => {
                 await reload();
                 setSel(id);
@@ -181,8 +197,25 @@ function Manager() {
   );
 }
 
-/** 밴드 화면의 저장 막대(content.js)가 연 요청을 작업으로 만든다. 주소는 밴드 주소만 받는다. */
-export async function jobFromPage(kind: "post" | "list", rawUrl: string, tabId?: number): Promise<{ id: string } | { error: string }> {
+/** 밴드 화면의 저장 막대(content.js)가 연 요청을 작업으로 만든다. 주소는 밴드 주소만 받는다. 같은 작업이 진행 중이면 그 작업으로 연결한다(6절) */
+export async function jobFromPage(kind: "post" | "list" | "sel", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+  if (kind === "sel") {
+    const m = parseMemberUrl(rawUrl);
+    if (!m) return { error: "인물(멤버) 화면에서만 인물 선택 저장을 쓸 수 있습니다." };
+    const selection: Selection = {
+      members: [{ ...m, name: null }],
+      authored: modes.includes("A"),
+      commentsOnly: modes.includes("B"),
+      commentedPosts: modes.includes("C"),
+      periodFrom: null,
+      periodTo: null,
+    };
+    if (!selection.authored && !selection.commentsOnly && !selection.commentedPosts) return { error: "수집할 항목을 고르지 않았습니다." };
+    const same = await findSameJob((j) => j.scope === "selection" && JSON.stringify(j.options.selection) === JSON.stringify(selection));
+    if (same) return { id: same.id };
+    const job = await createJob({ scope: "selection", label: describeSelection(selection), options: { ...DEFAULT_OPTIONS, selection }, bandNo: m.bandNo });
+    return { id: job.id };
+  }
   const u = parseBandUrl(rawUrl);
   if (!u) return { error: "밴드 주소가 아니라서 시작하지 않았습니다." };
   if (kind === "post") {
@@ -198,17 +231,47 @@ export async function jobFromPage(kind: "post" | "list", rawUrl: string, tabId?:
   }
   const member = u.kind === "member-list" && u.list === "post";
   const list = member ? u.canonical : `${u.origin.replace("://www.", "://")}/band/${u.bandNo}/post`;
+  const same = await findSameJob((j) => j.scope === "list" && j.bandNo === u.bandNo, list);
+  if (same) return { id: same.id };
   const job = await createJob({ scope: "list", label: member ? "멤버 작성글 목록" : "밴드 글 목록", options: DEFAULT_OPTIONS, bandNo: u.bandNo, lists: [list] });
   return { id: job.id };
 }
 
-function NewJob({ onCreated }: { onCreated(id: string): void }) {
-  const [mode, setMode] = useState<"urls" | "list">("urls");
+/** 끝나지 않은 같은 작업(반복 클릭 방지) */
+async function findSameJob(match: (j: Job) => boolean, listUrl?: string): Promise<Job | undefined> {
+  const open = await cdb().jobs.filter((j) => j.status !== "finished" && match(j)).toArray();
+  for (const j of open) {
+    if (!listUrl) return j;
+    if (await cdb().tasks.where("[jobId+key]").equals([j.id, `list:${listUrl}`]).first()) return j;
+  }
+  return undefined;
+}
+
+type NewMode = "urls" | "list" | "person";
+
+function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; initialListUrl?: string | null }) {
+  const initialMember = initialListUrl ? parseMemberUrl(initialListUrl) : null;
+  const [mode, setMode] = useState<NewMode>(initialMember ? "person" : initialListUrl ? "list" : "urls");
   const [urls, setUrls] = useState("");
-  const [listUrl, setListUrl] = useState("");
+  const [listUrl, setListUrl] = useState(() => {
+    const u = initialListUrl && !initialMember ? parseBandUrl(initialListUrl) : null;
+    if (!u) return "";
+    return u.kind === "member-list" ? u.canonical : `${u.origin.replace("://www.", "://")}/band/${u.bandNo}`;
+  });
+  const [people, setPeople] = useState(initialMember ? `${initialMember.origin}/band/${initialMember.bandNo}/member/${initialMember.memberKey}` : "");
+  const [modes, setModes] = useState({ authored: true, commentsOnly: false, commentedPosts: true });
   const [opts, setOpts] = useState({ ...DEFAULT_OPTIONS });
   const [err, setErr] = useState<string | null>(null);
   const parsed = useMemo(() => parsePostUrlList(urls), [urls]);
+  const members = useMemo(() => {
+    const out: SelectedMember[] = [];
+    for (const line of people.split(/\s+/)) {
+      const m = line ? parseMemberUrl(line) : null;
+      if (m && !out.some((x) => x.bandNo === m.bandNo && x.memberKey === m.memberKey)) out.push({ ...m, name: null });
+    }
+    return out;
+  }, [people]);
+  const selection: Selection = { members, ...modes, periodFrom: opts.periodFrom, periodTo: opts.periodTo };
 
   const submit = async () => {
     setErr(null);
@@ -224,26 +287,47 @@ function NewJob({ onCreated }: { onCreated(id: string): void }) {
         posts: parsed.posts.map((p) => ({ url: p.canonical, key: `band:${p.bandNo}:post:${p.postNo}` })),
       });
       onCreated(job.id);
-    } else {
+    } else if (mode === "list") {
       const u = parseBandUrl(listUrl);
       if (!u || !(u.kind === "feed" || (u.kind === "member-list" && u.list === "post")))
         return setErr("밴드 글 목록(https://band.us/band/숫자) 또는 멤버 작성글 목록 주소를 넣어 주세요.");
       const job = await createJob({ scope: "list", label: u.kind === "feed" ? "밴드 글 목록" : "멤버 작성글 목록", options: opts, bandNo: u.bandNo, lists: [u.canonical] });
       onCreated(job.id);
+    } else {
+      if (!members.length) return setErr("인물 프로필 주소(https://band.us/band/숫자/member/…)를 한 줄에 하나씩 넣어 주세요. 밴드에서 인물 사진을 눌러 연 화면의 주소입니다.");
+      if (!modes.authored && !modes.commentsOnly && !modes.commentedPosts) return setErr("수집할 항목을 하나 이상 골라 주세요.");
+      // 선택 수집의 기간은 모드별 기준으로 판단하므로(5절) 일반 기간 조건은 쓰지 않는다
+      const job = await createJob({
+        scope: "selection",
+        label: describeSelection(selection),
+        options: { ...opts, periodFrom: null, periodTo: null, selection },
+        bandNo: members[0].bandNo,
+      });
+      onCreated(job.id);
     }
   };
+
+  const summary =
+    mode === "person" && members.length
+      ? `${describeSelection(selection)} · ${modes.commentedPosts || modes.authored ? "원글 및 전체 댓글" : "댓글만"} · ${opts.includeImages ? "이미지는 뒤에서 받기" : "이미지 제외"}`
+      : null;
 
   return (
     <section className="card">
       <h2>새 수집</h2>
-      <p className="muted small">밴드에 로그인한 브라우저에서 실행하세요. 수집용 창이 하나 열리고 그 안에서만 글을 차례로 엽니다(1.5~3초 간격).</p>
+      <p className="muted small">밴드에 로그인한 브라우저에서 실행하세요. 수집용 창(목록용·글용)이 열리고 그 안에서만 차례로 엽니다(요청 간격 1.5~3초).</p>
       <div className="seg" role="radiogroup" aria-label="수집 대상">
-        <button type="button" role="radio" aria-checked={mode === "urls"} aria-pressed={mode === "urls"} onClick={() => setMode("urls")}>
-          글 주소 여러 개
-        </button>
-        <button type="button" role="radio" aria-checked={mode === "list"} aria-pressed={mode === "list"} onClick={() => setMode("list")}>
-          목록에서 글 찾기
-        </button>
+        {(
+          [
+            ["person", "인물 선택"],
+            ["list", "목록에서 글 찾기"],
+            ["urls", "글 주소 여러 개"],
+          ] as [NewMode, string][]
+        ).map(([k, l]) => (
+          <button key={k} type="button" role="radio" aria-checked={mode === k} aria-pressed={mode === k} onClick={() => setMode(k)}>
+            {l}
+          </button>
+        ))}
       </div>
       {mode === "urls" ? (
         <label className="field">
@@ -253,36 +337,65 @@ function NewJob({ onCreated }: { onCreated(id: string): void }) {
             인식한 글 {parsed.posts.length}개{parsed.rejected.length ? ` · 글 주소가 아닌 줄 ${parsed.rejected.length}개는 건너뜀` : ""}
           </small>
         </label>
-      ) : (
+      ) : mode === "list" ? (
         <label className="field">
           <span>목록 주소 (밴드 글 목록 또는 멤버 작성글 목록)</span>
           <input value={listUrl} onChange={(e) => setListUrl(e.target.value)} placeholder="https://band.us/band/12345" />
           <small className="muted">목록을 끝까지 스크롤하며 글 주소를 모은 뒤 하나씩 저장합니다. 새 글이 더 나오지 않으면 멈추고 '끝 확인 불가'로 표시합니다.</small>
         </label>
+      ) : (
+        <>
+          <label className="field">
+            <span>인물 프로필 주소 (한 줄에 하나, 여러 명 가능)</span>
+            <textarea rows={3} value={people} onChange={(e) => setPeople(e.target.value)} placeholder="https://band.us/band/12345/member/…" />
+            <small className="muted">
+              인식한 인물 {members.length}명. 인물은 이름이 아니라 밴드의 멤버 식별자로 구분합니다(같은 이름의 다른 사람과 섞이지 않음). 한 계정을 여러 캐릭터가 함께 쓰면 계정 기준으로 모입니다.
+            </small>
+          </label>
+          <fieldset className="filter-box">
+            <legend>무엇을 모을까요 (여러 개 선택 가능, 같은 글은 한 번만 저장)</legend>
+            <label className="check">
+              <input type="checkbox" checked={modes.authored} onChange={(e) => setModes({ ...modes, authored: e.target.checked })} /> 이 인물이 쓴 글 — 글과 그 글의 전체 댓글
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={modes.commentsOnly} onChange={(e) => setModes({ ...modes, commentsOnly: e.target.checked })} /> 이 인물이 쓴 댓글만 — 인물의 댓글 목록 그대로(다른 사람의 글·댓글은 넣지 않음)
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={modes.commentedPosts} onChange={(e) => setModes({ ...modes, commentedPosts: e.target.checked })} /> 이 인물이 댓글 단 글 — 원글과 다른 인물 포함 전체 댓글
+            </label>
+            <small className="muted">
+              밴드 전체 목록을 먼저 훑지 않고, 인물의 작성글·작성댓글 목록에서 필요한 글만 찾아 엽니다. 댓글 단 글은 댓글 목록 항목을 눌러 원글을 확인합니다(누르기만 하고 아무것도 쓰지 않음).
+            </small>
+          </fieldset>
+        </>
       )}
       <div className="row">
         <label className="field">
-          <span>작성일 시작 (선택)</span>
+          <span>{mode === "person" ? "기간 시작 (선택)" : "작성일 시작 (선택)"}</span>
           <input type="date" value={opts.periodFrom ?? ""} onChange={(e) => setOpts({ ...opts, periodFrom: e.target.value || null })} />
         </label>
         <label className="field">
-          <span>작성일 끝 (선택, 이 날 포함)</span>
+          <span>{mode === "person" ? "기간 끝 (선택, 이 날 포함)" : "작성일 끝 (선택, 이 날 포함)"}</span>
           <input type="date" value={opts.periodTo ?? ""} onChange={(e) => setOpts({ ...opts, periodTo: e.target.value || null })} />
         </label>
       </div>
+      {mode === "person" && (opts.periodFrom || opts.periodTo) ? (
+        <p className="small muted">기간 기준: 쓴 글은 글 작성일, 쓴 댓글·댓글 단 글은 이 인물의 댓글 작성일(1월 글에 9월 댓글을 달았다면 9월에 포함). 날짜를 못 읽은 댓글은 빼지 않고 '확인 필요'로 남깁니다.</p>
+      ) : null}
       <label className="check">
-        <input type="checkbox" checked={opts.includeImages} onChange={(e) => setOpts({ ...opts, includeImages: e.target.checked })} /> 이미지·프로필 사진 파일도 저장
+        <input type="checkbox" checked={opts.includeImages} onChange={(e) => setOpts({ ...opts, includeImages: e.target.checked })} /> 이미지·프로필 사진 파일도 저장 (본문을 먼저 저장하고 뒤에서 받음)
       </label>
       <label className="check">
-        <input type="checkbox" checked={opts.skipCaptured} onChange={(e) => setOpts({ ...opts, skipCaptured: e.target.checked })} /> 이 확장으로 이미 저장한 글은 건너뛰기
+        <input type="checkbox" checked={opts.skipCaptured} onChange={(e) => setOpts({ ...opts, skipCaptured: e.target.checked })} /> 이미 저장한 글은 다시 열지 않고 저장본 재사용
       </label>
       <label className="check">
-        <input type="checkbox" checked={opts.diagnostics} onChange={(e) => setOpts({ ...opts, diagnostics: e.target.checked })} /> 문제 진단 기록 남기기 (본문·이름·주소 없이 단계별 결과만, 이 컴퓨터에만 보관)
+        <input type="checkbox" checked={opts.diagnostics} onChange={(e) => setOpts({ ...opts, diagnostics: e.target.checked })} /> 문제 진단 기록 남기기 (본문·이름·주소·검색어 없이 단계별 결과만, 이 컴퓨터에만 보관)
       </label>
       <label className="field narrow">
         <span>파일 나누기 기준 (MB)</span>
         <input type="number" min={10} max={1000} value={opts.maxPartMB} onChange={(e) => setOpts({ ...opts, maxPartMB: Math.max(10, Number(e.target.value) || 100) })} />
       </label>
+      {summary ? <p className="notice">{summary}</p> : null}
       {err ? <p className="notice error">{err}</p> : null}
       <button type="button" className="ui-btn ui-btn-primary" onClick={submit}>
         수집 시작
@@ -290,10 +403,12 @@ function NewJob({ onCreated }: { onCreated(id: string): void }) {
       <details className="small muted">
         <summary>지원 범위와 검증 수준</summary>
         <ul>
-          <li>게시글 본문·작성자·시각·댓글·답글·이미지: 지원 — 저장 페이지 샘플로 구조 확인, 합성 화면에서 통과, <b>실제 밴드 화면에서는 미검증</b></li>
-          <li>글 목록 스크롤로 글 찾기: 지원 — 합성 화면에서 통과, 실제 밴드 미검증</li>
-          <li>접힌 댓글 자동 펼치기: 미지원(실제 버튼 구조 확인 전이라 누르지 않음). 표시 댓글 수와 비교해 '일부 확보'로 알려 줍니다</li>
-          <li>표정 종류·반응자, 프로필·스토리, 인물별 댓글 목록, 채팅: 아직 미지원(실제 화면 샘플 필요)</li>
+          <li>게시글 본문·작성자·시각·댓글·답글·이미지: 지원 — 저장 페이지 샘플로 구조 확인, 합성 화면에서 통과, 실제 밴드 화면 일부 확인</li>
+          <li>글 목록 스크롤로 글 찾기: 지원 — 합성 화면에서 통과, 실제 밴드에서 목록 끝까지 확인</li>
+          <li>인물 선택(쓴 글·쓴 댓글·댓글 단 글): 합성 화면에서 통과. 멤버 댓글 목록 구조는 저장 샘플로 확인했지만, 항목을 눌러 원글을 여는 동작은 <b>실제 밴드에서 미검증</b></li>
+          <li>접힌 댓글 자동 펼치기: 미지원. 표시 댓글 수와 비교해 '일부 확보'로 알려 줍니다</li>
+          <li>검색 결과 수집, 조건 교집합(AND): 준비 중</li>
+          <li>표정 종류·반응자, 프로필·스토리, 채팅: 아직 미지원</li>
         </ul>
       </details>
     </section>
@@ -321,7 +436,8 @@ function JobView({
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [caps, setCaps] = useState<Capture[]>([]);
-  const [assetStat, setAssetStat] = useState({ stored: 0, failed: 0, thumb: 0, bytes: 0 });
+  const [obs, setObs] = useState<CommentObservation[]>([]);
+  const [assetStat, setAssetStat] = useState({ stored: 0, failed: 0, thumb: 0, bytes: 0, waiting: 0 });
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
 
@@ -331,6 +447,7 @@ function JobView({
       const cs = await cdb().captures.where("jobId").equals(job.id).toArray();
       setTasks(ts);
       setCaps(cs);
+      setObs(await cdb().comments.where("jobId").equals(job.id).toArray());
       const urls = [...new Set(cs.flatMap((c) => c.imageUrls))];
       const as = (await cdb().assets.bulkGet(urls)).filter(Boolean);
       setAssetStat({
@@ -338,14 +455,23 @@ function JobView({
         failed: as.filter((a) => a!.status === "failed").length,
         thumb: as.filter((a) => a!.status === "stored" && a!.quality === "thumbnail").length,
         bytes: as.reduce((n, a) => n + (a!.size || 0), 0),
+        waiting: urls.length - as.filter((a) => a!.status === "stored" || a!.status === "failed").length,
       });
     })();
   }, [job]);
 
   const posts = tasks.filter((t) => t.kind === "post");
   const lists = tasks.filter((t) => t.kind === "list");
+  const commentLists = tasks.filter((t) => t.kind === "comments");
   const count = (s: Task["status"]) => posts.filter((t) => t.status === s).length;
   const stale = job.status === "running" && !running;
+  // 남은 시간: 이 창에서 수집을 시작한 뒤 끝난 글 수로 속도를 잰다
+  const doneNow = count("succeeded") + count("partial") + count("failed") + count("skipped");
+  const left = count("pending") + count("inFlight");
+  const pace = useRef<{ t: number; n: number } | null>(null);
+  if (!running) pace.current = null;
+  else if (!pace.current && tasks.length) pace.current = { t: Date.now(), n: doneNow };
+  const rate = pace.current && doneNow > pace.current.n ? (Date.now() - pace.current.t) / (doneNow - pace.current.n) : null;
 
   const exportNow = async () => {
     setBusy(true);
@@ -374,7 +500,8 @@ function JobView({
 
   const removeJob = async () => {
     if (!confirm("이 작업과 여기서 모은 글을 이 브라우저에서 지울까요? 이미 받은 .afterlog 파일은 그대로입니다.")) return;
-    await cdb().transaction("rw", [cdb().jobs, cdb().tasks, cdb().captures], async () => {
+    await cdb().transaction("rw", [cdb().jobs, cdb().tasks, cdb().captures, cdb().comments], async () => {
+      await cdb().comments.where("jobId").equals(job.id).delete();
       await cdb().tasks.where("jobId").equals(job.id).delete();
       await cdb().captures.where("jobId").equals(job.id).delete();
       await cdb().jobs.delete(job.id);
@@ -386,7 +513,7 @@ function JobView({
   return (
     <section className="card">
       <div className="job-head">
-        <h2>{job.bandName ?? job.label}</h2>
+        <h2>{jobTitle(job)}</h2>
         <span className={`badge st-${running ? "running" : stale ? "stale" : job.status}`}>{running ? "수집 중" : stale ? "중단됨" : STATUS_LABEL[job.status]}</span>
       </div>
       {job.pauseReason ? <p className="notice warn">{job.pauseReason}</p> : null}
@@ -401,10 +528,26 @@ function JobView({
           <div key={l.id} className="stat wide">
             <b>{l.result?.found ?? 0}</b>
             <span>
-              목록에서 찾은 글 · {l.status === "succeeded" ? (l.result?.coverage === "unknown" ? "끝 확인 불가" : l.result?.coverage === "partial" ? "일부만 탐색" : "끝") : "찾는 중"}
+              {l.listReason === "authored" ? "인물이 쓴 글" : "목록에서 찾은 글"} · {l.status === "succeeded" ? (l.result?.coverage === "unknown" ? "끝 확인 불가" : l.result?.coverage === "partial" ? "일부만 탐색" : "끝") : "찾는 중"}
             </span>
           </div>
         ))}
+        {commentLists.map((l) => {
+          const mine = obs.filter((o) => o.taskId === l.id);
+          const inRange = mine.filter((o) => o.inRange !== false);
+          return (
+            <div key={l.id} className="stat wide">
+              <b>{mine.length}</b>
+              <span>
+                {l.result?.memberName ?? "인물"}의 댓글 관측{inRange.length !== mine.length ? ` (기간 안 ${inRange.length})` : ""} ·{" "}
+                {l.status === "succeeded" ? (l.result?.coverage === "partial" ? "일부만 탐색" : "끝 확인 불가") : "읽는 중"}
+                {job.options.selection?.commentedPosts
+                  ? ` · 원글 확인 ${mine.filter((o) => o.link === "linked").length}${mine.some((o) => o.link === "guessed") ? ` · 대조 대기 ${mine.filter((o) => o.link === "guessed").length}` : ""}${mine.some((o) => o.link === "failed") ? ` · 원글 못 찾음 ${mine.filter((o) => o.link === "failed").length}` : ""}`
+                  : ""}
+              </span>
+            </div>
+          );
+        })}
         <div className="stat">
           <b>{count("succeeded")}</b>
           <span>확보</span>
@@ -435,8 +578,19 @@ function JobView({
           <b>{assetStat.failed}</b>
           <span>이미지 실패</span>
         </div>
+        {job.options.includeImages && assetStat.waiting ? (
+          <div className="stat">
+            <b>{assetStat.waiting}</b>
+            <span>이미지 대기</span>
+          </div>
+        ) : null}
       </div>
       {running && job.current ? <p className="small muted ellipsis">지금: {job.current}</p> : null}
+      {running && rate && left ? (
+        <p className="small muted">
+          글 하나에 약 {Math.round(rate / 1000)}초 · 남은 {left}개 약 {fmtDuration(rate * left)}
+        </p>
+      ) : null}
       {job.lastCheckpointAt ? <p className="small muted">마지막 저장 지점: {new Date(job.lastCheckpointAt).toLocaleString()}</p> : null}
 
       <div className="actions">
@@ -496,6 +650,8 @@ function JobView({
   );
 }
 
+const REASON_LABEL: Record<SelectReason, string> = { authored: "쓴 글", commented: "댓글 단 글", search: "검색", list: "목록", url: "주소" };
+
 function PostRow({ n, task, capture, open, onToggle, job }: { n: number; task: Task; capture: Capture | null; open: boolean; onToggle(): void; job: Job }) {
   const [verified, setVerified] = useState(!!task.result?.userVerified);
   const preview = useMemo(() => {
@@ -512,6 +668,7 @@ function PostRow({ n, task, capture, open, onToggle, job }: { n: number; task: T
         <td>{n}</td>
         <td>{TASK_LABEL[task.status]}</td>
         <td className="ellipsis" title={task.url}>
+          {job.scope === "selection" && task.reasons?.length ? <span className="reason-tags">{task.reasons.map((r) => REASON_LABEL[r]).join(" · ")}</span> : null}
           {c?.title ?? task.url}
         </td>
         <td>{c?.commentsFound !== undefined ? `${c.commentsShown ?? "?"} / ${c.commentsFound}` : ""}</td>

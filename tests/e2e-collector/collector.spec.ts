@@ -33,7 +33,12 @@ async function manager(query = ""): Promise<Page> {
 }
 
 async function waitStatus(p: Page, text: RegExp, timeout = 150_000) {
-  await expect(p.locator(".job-head .badge")).toHaveText(text, { timeout });
+  try {
+    await expect(p.locator(".job-head .badge")).toHaveText(text, { timeout });
+  } catch (e) {
+    await p.screenshot({ path: `${OUT}/fail-${Date.now()}.png`, fullPage: true }).catch(() => undefined);
+    throw e;
+  }
 }
 
 const stat = (p: Page, label: string) => p.locator(".stat", { hasText: label }).locator("b");
@@ -121,7 +126,7 @@ test("T04 수집 중 관리 창을 닫아도 이어받으면 중복 없이 끝�
   const p = await manager();
   await p.getByRole("button", { name: "새 수집" }).click();
   await p.getByPlaceholder("https://band.us/band/12345/post/678").fill([1, 2, 3, 4, 5, 6].map((n) => `${BAND}/post/${n}`).join("\n"));
-  await p.getByLabel("이 확장으로 이미 저장한 글은 건너뛰기").uncheck();
+  await p.getByLabel("이미 저장한 글은 다시 열지 않고 저장본 재사용").uncheck();
   await p.getByRole("button", { name: "수집 시작" }).click();
   await expect.poll(async () => Number(await stat(p, "확보").first().textContent()), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
   await p.close(); // 창 강제 종료
@@ -192,7 +197,7 @@ test("밴드 화면 저장 막대: 글 화면·목록 화면에서 바로 저장
   await expect(band.locator(".cPostCard")).toBeVisible();
   const bar = band.locator("#afterlog-collector-bar");
   await expect(bar.getByRole("button", { name: "이 글 저장" })).toBeVisible();
-  await expect(bar.getByRole("button", { name: "이 밴드 글 전체 저장" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "골라서 저장…" })).toBeVisible();
   await band.screenshot({ path: `${OUT}/04-page-bar.png` });
 
   // 이 글 저장: 지금 탭을 그대로 읽는다
@@ -221,5 +226,71 @@ test("밴드 화면 저장 막대: 글 화면·목록 화면에서 바로 저장
   await expect(bar.getByRole("button", { name: "이 밴드 글 전체 저장" })).toBeHidden();
   await bar.getByRole("button", { name: "AFTERLOG 저장" }).click();
   await expect(bar.getByRole("button", { name: "이 밴드 글 전체 저장" })).toBeVisible();
+  await band.close();
+});
+
+test("인물 선택(C): 인물 댓글 목록에서 '연결된 원글까지' → 항목을 눌러 원글 확인, 같은 원글은 한 번만", async () => {
+  const hits0 = await (await fetch("http://localhost:4588/stats")).json();
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/member/MKNARAE/comment`);
+  const bar = band.locator("#afterlog-collector-bar");
+  await expect(bar.getByRole("button", { name: "이 댓글 목록 저장" })).toBeVisible();
+  await band.screenshot({ path: `${OUT}/05-member-comments-bar.png` });
+  const mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "연결된 원글까지" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 120_000);
+  // 댓글 5개 관측, 5개 모두 원글 확인(3번 글 셋 · 8번 · 13번)
+  const commentStat = mgr.locator(".stat.wide", { hasText: "댓글 관측" });
+  await expect(commentStat.locator("b")).toHaveText("5");
+  await expect(commentStat).toContainText("원글 확인 5");
+  await expect(mgr.locator("tbody tr")).toHaveCount(3);
+  // 앞 검사에서 이미 저장한 글은 다시 열지 않고 저장본을 재사용해 파일에 포함한다
+  await expect(stat(mgr, "확보").first()).toHaveText("3");
+  await expect(mgr.locator(".job-head h2")).toContainText("나래");
+  await mgr.screenshot({ path: `${OUT}/06-selection-finished.png`, fullPage: true });
+  // 3번 글은 글 탭에서 한 번만 열었다(같은 원글의 다른 댓글은 저장본과 대조). 이미 저장한 글이면 0번
+  const hits1 = await (await fetch("http://localhost:4588/stats")).json();
+  expect((hits1["3"] ?? 0) - (hits0["3"] ?? 0)).toBeLessThanOrEqual(1);
+  // 목록의 선택 체크박스는 누르지 않았다(쓰기·선택 동작 없음)
+  for (const p of ctx.pages().filter((x) => x.url().includes("/member/MKNARAE/comment"))) {
+    expect(await p.evaluate(() => document.querySelectorAll("input:checked").length)).toBe(0);
+  }
+  await mgr.close();
+  await band.close();
+});
+
+test("인물 선택(A): 인물 화면 '이 인물의 글' → 작성글 목록에서 찾은 글만 연다", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/member/MKDAON`);
+  const bar = band.locator("#afterlog-collector-bar");
+  await expect(bar.getByRole("button", { name: "댓글 단 글까지" })).toBeVisible();
+  const mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 인물의 글" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 120_000);
+  await expect(mgr.locator(".stat.wide", { hasText: "인물이 쓴 글" }).locator("b")).toHaveText("4");
+  await expect(mgr.locator(".job-head h2")).toHaveText("다온의 쓴 글");
+  await expect(mgr.locator("tbody tr")).toHaveCount(4);
+  await mgr.close();
+  await band.close();
+});
+
+test("골라서 저장…: 인물 화면에서 열면 인물 선택 화면이 채워진다", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/member/MKDAON/post`);
+  const mgrPromise = ctx.waitForEvent("page");
+  await band.locator("#afterlog-collector-bar").getByRole("button", { name: "골라서 저장…" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await expect(mgr.getByRole("radio", { name: "인물 선택" })).toHaveAttribute("aria-checked", "true");
+  await expect(mgr.getByPlaceholder("https://band.us/band/12345/member/…")).toHaveValue(`${BAND}/member/MKDAON`);
+  await expect(mgr.getByText("인식한 인물 1명")).toBeVisible();
+  await mgr.getByLabel(/이 인물이 쓴 댓글만/).check();
+  await expect(mgr.locator(".notice", { hasText: "선택한 인물의 쓴 글·쓴 댓글·댓글 단 글" })).toBeVisible();
+  await mgr.screenshot({ path: `${OUT}/07-selection-form.png`, fullPage: true });
+  await mgr.close();
   await band.close();
 });

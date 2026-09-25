@@ -45,6 +45,7 @@ export const ERROR_CODES = [
   "outOfRange",
   "scopeMissing",
   "frameGone",
+  "filteredOut",
   "other",
 ] as const;
 export const FIELD_KEYS = [
@@ -93,7 +94,7 @@ export const DURATION_BUCKETS = ["lt1s", "1to3s", "3to10s", "gt10s"] as const;
 export const SIZE_BUCKETS = ["lt100KB", "100KBto1MB", "1to10MB", "gt10MB"] as const;
 export const MEDIA_KINDS = ["image", "gif", "video", "file", "unknown"] as const;
 export const END_EVIDENCE = ["explicitEnd", "noProgress", "maxRounds", "error", "notChecked"] as const;
-export const SCOPES = ["current-post", "post-urls", "list"] as const;
+export const SCOPES = ["current-post", "post-urls", "list", "selection"] as const;
 export const BROWSERS = ["chrome", "edge", "other"] as const;
 export const UI_LANGS = ["ko", "en", "ja", "other"] as const;
 export const SCREEN_BUCKETS = ["lt1024", "1024to1440", "gt1440"] as const;

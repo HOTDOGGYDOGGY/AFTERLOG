@@ -14,6 +14,15 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   } else if (msg.act === "list") {
     q.set("new", "list");
     q.set("url", sender.tab.url || "");
+  } else if (typeof msg.act === "string" && /^sel:[ABC]+$/.test(msg.act)) {
+    // 인물 선택 수집: A 쓴 글 · B 쓴 댓글만 · C 댓글 단 글
+    q.set("new", "sel");
+    q.set("modes", msg.act.slice(4));
+    q.set("url", sender.tab.url || "");
+  } else if (msg.act === "form") {
+    // 조건을 정하는 새 수집 화면(이 밴드 주소를 채워 둠). 바로 시작하지 않는다
+    q.set("new", "form");
+    q.set("url", sender.tab.url || "");
   }
   chrome.tabs.create({ url: chrome.runtime.getURL(`manager.html${q.toString() ? `?${q}` : ""}`) }).then(() => reply({ ok: true }));
   return true;

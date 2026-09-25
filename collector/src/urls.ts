@@ -49,3 +49,17 @@ export function parsePostUrlList(text: string, origins = BAND_ORIGINS): { posts:
   }
   return { posts, rejected };
 }
+
+/** 인물(멤버) 주소: /band/숫자/member/식별자[/post|/comment|/photo…]. 선택 수집의 인물은 이 식별자로 구분한다(3.3) */
+export function parseMemberUrl(raw: string, origins = BAND_ORIGINS): { origin: string; bandNo: string; memberKey: string } | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (!origins.includes(u.origin)) return null;
+  const m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)(?:\/.*)?$/);
+  if (!m) return null;
+  return { origin: u.origin.replace("://www.", "://"), bandNo: m[1], memberKey: m[2] };
+}

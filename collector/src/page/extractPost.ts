@@ -116,8 +116,8 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
       if (sig !== lastSig) {
         lastSig = sig;
         stableSince = Date.now();
-      } else if (Date.now() - stableSince >= (loading ? Math.max(opts.stableMs * 4, 6000) : opts.stableMs)) {
-        // 로딩 표시가 계속 떠 있어도 내용이 한참 그대로면 더 오지 않는 것으로 본다(댓글 수가 모자라면 '일부'로 남는다)
+      } else if (Date.now() - stableSince >= (loading ? Math.max(opts.stableMs * 2, 3000) : opts.stableMs)) {
+        // 로딩 표시가 계속 떠 있어도 내용이 3초 이상 그대로면 더 오지 않는 것으로 본다(댓글 수가 모자라면 '일부'로 남는다)
         ready = true;
         break;
       }

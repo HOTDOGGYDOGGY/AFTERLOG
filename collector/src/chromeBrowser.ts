@@ -1,7 +1,8 @@
 // chrome API로 동작하는 수집 브라우저. 수집 관리 페이지(확장 페이지)에서 쓴다.
-// 수집 전용 창을 하나 열고 그 안에서만 이동한다. 사용자의 탭(tabId)은 이동시키지 않고 읽기만 한다.
+// 수집 전용 창(목록용·글용)을 열고 그 안에서만 이동한다. 사용자의 탭(tabId)은 이동시키지 않고 읽기만 한다.
 import { BAND_ORIGINS, LIMITS, MIN_DELAY_MS } from "./config";
-import { BrowserError, fetchImage, type CollectorBrowser } from "./browser";
+import { BrowserError, fetchImage, type CollectorBrowser, type TabRole } from "./browser";
+import { openCommentPostInPage, readMemberCommentsInPage, type MemberCommentsRound, type OpenCommentPostResult } from "./page/memberComments";
 import { extractPostInPage, type PostExtraction } from "./page/extractPost";
 import { discoverRoundInPage, type DiscoverRound } from "./page/discoverLinks";
 import { sampleStructureInPage } from "./diagnostics/structure";
@@ -10,30 +11,38 @@ import { STRUCT_ROLES, STRUCT_TAGS } from "./diagnostics/schema";
 import { STRUCT_LIMITS } from "./diagnostics/serializer";
 
 export class ChromeBrowser implements CollectorBrowser {
-  private windowId: number | null = null;
-  private tabId: number | null = null;
+  // 역할별 창·탭(선택 수집 명세 7.2): 목록·댓글 목록을 훑는 탭(discover)과 글을 여는 탭(body)을 나눠,
+  // 한쪽의 이동이 다른 쪽이 읽는 페이지를 바꾸지 않게 한다. 각 탭 안에서는 엔진이 한 번에 하나만 실행한다.
+  private windows: Record<TabRole, number | null> = { discover: null, body: null };
+  private tabs: Record<TabRole, number | null> = { discover: null, body: null };
 
-  private async collectTab(): Promise<number> {
-    if (this.tabId !== null) {
+  private async collectTab(role: TabRole): Promise<number> {
+    const cur = this.tabs[role];
+    if (cur !== null) {
       try {
-        await chrome.tabs.get(this.tabId);
-        return this.tabId;
+        await chrome.tabs.get(cur);
+        return cur;
       } catch {
-        this.tabId = null;
+        this.tabs[role] = null;
       }
     }
-    // 백그라운드 탭은 화면 갱신이 멈출 수 있어, 초점을 뺏지 않는 별도 창을 쓴다
+    // 백그라운드 탭은 화면 갱신이 멈출 수 있어(무한 스크롤이 안 불러와짐), 역할마다 초점을 뺏지 않는 별도 창을 쓴다
     const w = await chrome.windows.create({ url: "about:blank", focused: false, width: 1100, height: 900, type: "normal" });
-    this.windowId = w?.id ?? null;
-    this.tabId = w?.tabs?.[0]?.id ?? null;
-    if (this.tabId === null) throw new BrowserError("other", "수집용 창을 열지 못했습니다.");
+    this.windows[role] = w?.id ?? null;
+    const tabId = w?.tabs?.[0]?.id ?? null;
+    if (tabId === null) throw new BrowserError("other", "수집용 창을 열지 못했습니다.");
+    this.tabs[role] = tabId;
     // 오래 뒤에 있는 창이라 크롬의 메모리 절약 기능이 탭을 비우면 읽던 페이지가 사라진다(Frame … was removed)
-    await chrome.tabs.update(this.tabId, { autoDiscardable: false }).catch(() => undefined);
-    return this.tabId;
+    await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => undefined);
+    return tabId;
   }
 
-  private async navigate(url: string): Promise<{ tabId: number; ms: number }> {
-    const tabId = await this.collectTab();
+  private forget(tabId: number) {
+    for (const r of ["discover", "body"] as const) if (this.tabs[r] === tabId) this.tabs[r] = null;
+  }
+
+  private async navigate(url: string, role: TabRole): Promise<{ tabId: number; ms: number }> {
+    const tabId = await this.collectTab(role);
     const t0 = Date.now();
     await chrome.tabs.update(tabId, { url });
     const deadline = t0 + LIMITS.pageTimeoutMs;
@@ -43,7 +52,7 @@ export class ChromeBrowser implements CollectorBrowser {
       try {
         tab = await chrome.tabs.get(tabId);
       } catch {
-        this.tabId = null;
+        this.forget(tabId);
         throw new BrowserError("tabClosed", "수집용 창이 닫혔습니다. 이어받기를 누르면 다시 엽니다.");
       }
       if (tab.status === "complete" && tab.url && tab.url !== "about:blank") {
@@ -89,7 +98,7 @@ export class ChromeBrowser implements CollectorBrowser {
       try {
         tab = await chrome.tabs.get(tabId);
       } catch {
-        this.tabId = null;
+        this.forget(tabId);
         throw new BrowserError("tabClosed", "수집용 창이 닫혔습니다. 이어받기를 누르면 다시 엽니다.");
       }
       if (tab.discarded) await chrome.tabs.reload(tabId).catch(() => undefined);
@@ -103,25 +112,45 @@ export class ChromeBrowser implements CollectorBrowser {
     let tabId: number;
     let ms = 0;
     if (target.tabId !== undefined) tabId = target.tabId;
-    else ({ tabId, ms } = await this.navigate(target.url!));
+    else ({ tabId, ms } = await this.navigate(target.url!, "body"));
     const ex = await this.exec<[{ timeoutMs: number; stableMs: number; probes: [string, string][] }], PostExtraction>(tabId, extractPostInPage, [
       { timeoutMs: LIMITS.pageTimeoutMs, stableMs: Math.max(750, MIN_DELAY_MS), probes: POST_PROBES },
     ]);
+    // 이동 뒤에 다른 글로 바뀌었으면(프레임 교체 등) 저장하지 않는다(F11)
+    if (ex.ok && target.url) {
+      const want = target.url.match(/\/post\/(\d+)/)?.[1];
+      const got = (ex.postHref ?? ex.pageUrl).match(/\/post\/(\d+)/)?.[1];
+      if (want && got && want !== got) throw new BrowserError("frameGone", "읽는 사이 다른 글로 바뀌어 저장하지 않았습니다. 다시 시도합니다.");
+    }
     return { ex, loadMs: ms + ex.waitedMs };
   }
 
   async openList(url: string) {
-    await this.navigate(url);
+    await this.navigate(url, "discover");
     await new Promise((r) => setTimeout(r, MIN_DELAY_MS));
   }
 
   async discoverRound(bandNo: string): Promise<DiscoverRound> {
-    const tabId = await this.collectTab();
+    const tabId = await this.collectTab("discover");
     return this.exec<[{ bandNo: string; waitMs: number }], DiscoverRound>(tabId, discoverRoundInPage, [{ bandNo, waitMs: Math.max(1000, MIN_DELAY_MS) }]);
   }
 
+  async readMemberComments(opts: { from: number; scroll: boolean }): Promise<MemberCommentsRound> {
+    const tabId = await this.collectTab("discover");
+    return this.exec<[{ from: number; waitMs: number; scroll: boolean }], MemberCommentsRound>(tabId, readMemberCommentsInPage, [
+      { from: opts.from, scroll: opts.scroll, waitMs: Math.max(1000, MIN_DELAY_MS) },
+    ]);
+  }
+
+  async openCommentPost(opts: { seq: number; expectText: string; expectDate: string; bandNo: string }): Promise<OpenCommentPostResult> {
+    const tabId = await this.collectTab("discover");
+    return this.exec<[{ seq: number; expectText: string; expectDate: string; bandNo: string; timeoutMs: number }], OpenCommentPostResult>(tabId, openCommentPostInPage, [
+      { ...opts, timeoutMs: Math.min(LIMITS.pageTimeoutMs, 15_000) },
+    ]);
+  }
+
   async sampleStructure(target: { url?: string; tabId?: number }) {
-    const tabId = target.tabId ?? (await this.collectTab());
+    const tabId = target.tabId ?? (await this.collectTab("body"));
     return this.exec(tabId, sampleStructureInPage, [
       { scope: "postCard", probes: POST_PROBES, tags: [...STRUCT_TAGS], roles: [...STRUCT_ROLES], maxDepth: STRUCT_LIMITS.maxDepth, maxNodes: STRUCT_LIMITS.maxNodes },
     ] as [Parameters<typeof sampleStructureInPage>[0]]);
@@ -132,8 +161,11 @@ export class ChromeBrowser implements CollectorBrowser {
   }
 
   async dispose() {
-    if (this.windowId !== null) await chrome.windows.remove(this.windowId).catch(() => undefined);
-    this.windowId = null;
-    this.tabId = null;
+    for (const r of ["discover", "body"] as const) {
+      const w = this.windows[r];
+      if (w !== null) await chrome.windows.remove(w).catch(() => undefined);
+      this.windows[r] = null;
+      this.tabs[r] = null;
+    }
   }
 }

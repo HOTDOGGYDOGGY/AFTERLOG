@@ -11,6 +11,8 @@ export interface DiscoverRound {
   /** 명시적인 끝 표시를 찾았는지(검증된 표시가 없으면 false) */
   endMarker: boolean;
   loginRequired: boolean;
+  /** 인물 화면 머리글의 이름(인물 작성글 목록일 때). 표시용 */
+  memberName?: string | null;
 }
 
 export async function discoverRoundInPage(opts: { bandNo: string; waitMs: number }): Promise<DiscoverRound> {
@@ -46,5 +48,6 @@ export async function discoverRoundInPage(opts: { bandNo: string; waitMs: number
     atBottom,
     endMarker: false,
     loginRequired: /(^|\.)auth\.band\.us$/.test(location.hostname) || !!document.querySelector("input[type=password]"),
+    memberName: (document.querySelector(".accountSectionHeader .title .sf_color")?.textContent ?? "").replace(/\s+/g, " ").trim() || null,
   };
 }

@@ -7,7 +7,8 @@ import { buildDocument } from "../../src/importers/band/build";
 import { BAND_HTML_PARSER_VERSION, imageRefFromSrc, parseBandHtml } from "../../src/importers/band/html";
 import { sha256Hex } from "../../src/storage/hash";
 import { COLLECTOR_VERSION } from "./config";
-import { cdb, type Capture, type Job, type Task } from "./db";
+import { cdb, type Capture, type CommentObservation, type Job, type Task } from "./db";
+import { describeSelection } from "./selection";
 import { safeName } from "../../src/exporters/fileName";
 
 export interface ExportedPart {
@@ -19,12 +20,11 @@ const UNSUPPORTED = [
   "접힌 댓글·'이전 댓글' 자동 펼치기 (실제 화면의 버튼 구조 확인 전이라 누르지 않음)",
   "표정 종류별 수·반응자 명단",
   "인물 프로필·스토리·프로필 댓글",
-  "인물별 작성 댓글 목록",
   "밴드 채팅",
   "동영상·일반 파일 첨부 원본",
 ];
 
-export async function buildReport(job: Job, tasks: Task[], caps: Capture[], exportedAt: string): Promise<CaptureReport> {
+export async function buildReport(job: Job, tasks: Task[], caps: Capture[], exportedAt: string, obs: CommentObservation[] = []): Promise<CaptureReport> {
   const urls = new Set(caps.flatMap((c) => c.imageUrls));
   const assets = (await cdb().assets.bulkGet([...urls])).filter(Boolean);
   const posts = tasks.filter((t) => t.kind === "post");
@@ -60,8 +60,26 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
         title: t.result?.title,
         comments: t.result?.commentsFound !== undefined ? { shown: t.result.commentsShown ?? null, found: t.result.commentsFound } : undefined,
         error: t.errorText ?? undefined,
+        reasons: t.reasons,
       })),
     },
+    selection: job.options.selection
+      ? {
+          summary: describeSelection(job.options.selection),
+          modes: { authored: job.options.selection.authored, commentsOnly: job.options.selection.commentsOnly, commentedPosts: job.options.selection.commentedPosts },
+          period: { from: job.options.selection.periodFrom, to: job.options.selection.periodTo, basis: "쓴 글: 글 작성일 · 쓴 댓글·댓글 단 글: 이 인물의 댓글 작성일" },
+          members: job.options.selection.members.map((m) => ({ bandNo: m.bandNo, name: tasks.find((t) => t.memberKey === m.memberKey && t.result?.memberName)?.result?.memberName ?? m.name })),
+          comments: {
+            observed: obs.length,
+            inRange: obs.filter((o) => o.inRange === true).length,
+            dateUnknown: obs.filter((o) => o.inRange === null).length,
+            linked: obs.filter((o) => o.link === "linked").length,
+            linkFailed: obs.filter((o) => o.link === "failed").length,
+            verified: obs.filter((o) => o.content === "verified").length,
+            listTextOnly: obs.filter((o) => o.content === "listText").length,
+          },
+        }
+      : undefined,
     assets: {
       stored: assets.filter((a) => a!.status === "stored" && a!.quality !== "thumbnail").length,
       thumbnailOnly: assets.filter((a) => a!.status === "stored" && a!.quality === "thumbnail").length,
@@ -84,7 +102,8 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
   if (!job) throw new Error("작업이 없습니다.");
   // 수집 중에도 일관된 시점으로(명세 11.3): 지금 저장된 것만 읽어서 만든다
   const tasks = await cdb().tasks.where("jobId").equals(jobId).sortBy("order");
-  const caps = await cdb().captures.where("jobId").equals(jobId).toArray();
+  // 선택 수집에서 기간 밖이라 뺀 저장본은 넣지 않는다
+  const caps = (await cdb().captures.where("jobId").equals(jobId).toArray()).filter((c) => !c.excluded);
   const orderOf = new Map(tasks.map((t) => [t.id, t.order]));
   caps.sort((a, b) => (orderOf.get(a.taskId) ?? 0) - (orderOf.get(b.taskId) ?? 0));
   const exportedAt = new Date().toISOString();
@@ -143,7 +162,44 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
     documents.push(doc);
   }
 
-  const report = await buildReport(job, tasks, caps, exportedAt);
+  // 인물의 댓글만(B): 인물마다 댓글 모음 문서 하나. 목록이 보여 준 그대로(원글은 목록의 발췌만)이며 다른 사람의 글·댓글 전문은 넣지 않는다(F05)
+  const obs = await cdb().comments.where("jobId").equals(jobId).toArray();
+  if (job.options.selection?.commentsOnly) {
+    for (const t of tasks.filter((x) => x.kind === "comments")) {
+      const mine = obs.filter((o) => o.taskId === t.id && o.inRange !== false).sort((a, b) => a.seq - b.seq);
+      if (!mine.length) continue;
+      const name = t.result?.memberName ?? mine[0].memberName ?? "";
+      const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(name)} 댓글 모음</title></head><body><div class="accountSectionHeader"><h1 class="title"><span class="sf_color">${esc(name)}</span></h1></div><div data-viewname="DBandMemberCommentListView">${mine.map((o) => o.html).join("")}</div></body></html>`;
+      const pd = parseBandHtml(html).documents.find((d) => d.format === "band-member-comments");
+      if (!pd) continue;
+      const bytes = new TextEncoder().encode(html);
+      const sourceId = crypto.randomUUID();
+      sources.push({
+        id: sourceId,
+        fileName: `band-${mine[0].bandNo}-member-comments.html`,
+        mime: "text/html",
+        importedAt: exportedAt,
+        parserVersion: BAND_HTML_PARSER_VERSION,
+        sha256: await sha256Hex(bytes),
+        kind: "band-collector-capture",
+        data: bytes,
+      });
+      const doc = buildDocument(pd, { projectId, sourceId, parserVersion: BAND_HTML_PARSER_VERSION, assetMap: new Map(), sourceKind: "band-collector-capture" });
+      const unverified = mine.filter((o) => o.content !== "verified").length;
+      if (unverified)
+        doc.issues.push({
+          id: crypto.randomUUID(),
+          kind: "unverified-structure",
+          message: `댓글 ${mine.length}개 중 ${unverified}개는 댓글 목록에 보인 글자 그대로입니다(원글의 댓글과 대조하지 않아 전문인지 확인되지 않음).`,
+          resolved: false,
+        });
+      doc.revision = 1;
+      documents.push(doc);
+    }
+  }
+
+  const report = await buildReport(job, tasks, caps, exportedAt, obs);
   const project: Project = {
     id: projectId,
     title: job.bandName ?? job.label,
