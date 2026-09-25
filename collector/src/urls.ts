@@ -63,3 +63,21 @@ export function parseMemberUrl(raw: string, origins = BAND_ORIGINS): { origin: s
   if (!m) return null;
   return { origin: u.origin.replace("://www.", "://"), bandNo: m[1], memberKey: m[2] };
 }
+
+/**
+ * 검색 결과 화면 주소. 검색어·조건이 담긴 주소를 바꾸지 않고 그대로 돌려준다(일반 주소 정리로 query를 잃지 않게, 4.2).
+ * 실제 검색 주소 형식은 확인 전이라 밴드 안 주소면 받고, 흔한 검색어 매개변수가 있으면 검색어로 읽는다.
+ */
+export function parseSearchUrl(raw: string, origins = BAND_ORIGINS): { url: string; bandNo: string; keywords: string[] } | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (!origins.includes(u.origin)) return null;
+  const m = u.pathname.match(/^\/band\/(\d+)(?:\/.*)?$/);
+  if (!m) return null;
+  const k = ["keyword", "query", "q", "searchKeyword"].map((p) => u.searchParams.get(p)).find((v) => v && v.trim());
+  return { url: u.href, bandNo: m[1], keywords: k ? [k.trim()] : [] };
+}

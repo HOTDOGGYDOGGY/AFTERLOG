@@ -39,9 +39,26 @@ export interface Selection {
   authored: boolean;
   commentsOnly: boolean;
   commentedPosts: boolean;
-  /** 기간 기준(5절): A는 글 작성일, B·C는 이 인물의 댓글 작성일 */
+  /** 기간 기준(5절): A는 글 작성일, B·C는 이 인물의 댓글 작성일, D는 일치한 본문(글)·댓글의 작성일 */
   periodFrom: string | null;
   periodTo: string | null;
+  /** D: 사용자가 밴드에서 연 검색 결과(주소 그대로 보존, 4.2) */
+  search?: SearchSelection | null;
+  /** 조건 조합: or 합집합(기본) · and 같은 글에 켜진 글 조건(A·C·D)이 모두 맞을 때만 */
+  combine?: "or" | "and";
+}
+
+export interface SearchSelection {
+  /** 검색 결과 화면 주소(검색어·조건이 담긴 주소를 바꾸지 않고 보관) */
+  url: string;
+  /** 로컬 재검증 검색어. 비우면 밴드 검색 결과를 그대로 믿는다 */
+  keywords: string[];
+  /** any 하나라도 포함(기본) · all 모두 포함(같은 본문 또는 같은 댓글 안에서) */
+  match: "any" | "all";
+  /** 제외어: 일치한 본문·댓글에 있으면 일치로 보지 않는다 */
+  exclude: string[];
+  /** body 게시글 본문만(기본) · bodyAndComments 댓글도(댓글은 하나씩 따로 본다) */
+  fields: "body" | "bodyAndComments";
 }
 
 /** 대상이 된 이유(한 글에 여러 개 가능, 8절) */
@@ -136,6 +153,9 @@ export interface Task {
     userVerified?: boolean;
     /** 이전 저장본 재사용(이번에 다시 열지 않음) */
     reused?: boolean;
+    /** 선택 수집 판정: 맞은 조건 · 검색어 일치 위치 */
+    confirmed?: SelectReason[];
+    matches?: { where: "body" | "comment"; index: number; terms: string[] }[];
   };
 }
 
@@ -157,8 +177,11 @@ export interface Capture {
   reasons?: SelectReason[];
   /** 이전 작업의 저장본을 다시 쓴 것이면 그 저장 시각(이번에 다시 열지 않음) */
   reusedFrom?: string;
-  /** 선택 수집에서 열어 봤지만 결과에서 뺀 저장본(글 작성일이 기간 밖). 다른 조건(댓글 단 글)으로 대상이 되면 다시 열지 않고 살린다 */
-  excluded?: "outOfRange";
+  /**
+   * 선택 수집에서 열어 봤지만 결과에서 뺀 저장본. outOfRange 기간 밖 · noMatch 검색어 불일치 · unknown 판단 불가(댓글 미로딩 등) ·
+   * notAll 교집합(AND) 밖. 다른 조건으로 대상이 되면 다시 열지 않고 다시 판단한다
+   */
+  excluded?: "outOfRange" | "noMatch" | "unknown" | "notAll";
 }
 
 export type AssetStatus = "pending" | "stored" | "failed" | "unavailable" | "notRequested" | "unsupported";

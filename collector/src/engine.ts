@@ -5,7 +5,7 @@ import { parseBandHtml, type ParsedDocument } from "../../src/importers/band/htm
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type SelectReason, type Task } from "./db";
 import { parseKoreanDateTime } from "../../src/importers/band/time";
-import { commentInCapture, describeSelection } from "./selection";
+import { commentInCapture, describeSelection, judgePost, type PostVerdict } from "./selection";
 import { BrowserError, imageQuality, type CollectorBrowser, type TabRole } from "./browser";
 import { DiagRecorder, pruneDiagnostics } from "./diagnostics/recorder";
 import { countBucket, durationBucket, sizeBucket, type CountBucket, type ProbeId } from "./diagnostics/schema";
@@ -66,21 +66,38 @@ async function findCapture(key: string, notJob?: string): Promise<Capture | unde
 /** 진행 중인 이미지 요청(같은 주소 중복 방지). 수집 관리 창 하나에서 공유한다 */
 const ASSET_IN_FLIGHT = new Map<string, Promise<void>>();
 
+export const EXCLUDED_TEXT: Record<NonNullable<Capture["excluded"]>, string> = {
+  outOfRange: "기간 밖이라 결과에서 뺐습니다(저장본은 남겨 둠).",
+  noMatch: "검색어가 본문(선택 시 댓글)에 없어 결과에서 뺐습니다.",
+  unknown: "판단할 수 없어 결과에서 뺐습니다(댓글을 다 불러오지 못했거나 작성 시각을 모름). 확인이 필요합니다.",
+  notAll: "모든 조건(교집합)에 맞지 않아 결과에서 뺐습니다.",
+};
+
 /**
- * 과제에 선정 사유를 더한다(저장본에도). 글 작성일 때문에 빠졌던 글이 댓글 날짜 기준 조건으로 대상이 되면
- * 이미 받아 둔 저장본을 살린다(다시 열지 않음). 살렸으면 그 저장본을 돌려준다(이미지를 받게)
+ * 과제에 선정 사유를 더한다(저장본에도). 조건 판정으로 빠졌던 글이 다른 조건으로 대상이 되면
+ * 이미 받아 둔 저장본으로 다시 판정한다(다시 열지 않음). 살렸으면 그 저장본을 돌려준다(이미지를 받게)
  */
-async function addReason(task: Task, reason: SelectReason): Promise<Capture | null> {
+async function addReason(task: Task, reason: SelectReason, job: Job): Promise<Capture | null> {
   const fresh = (await cdb().tasks.get(task.id)) ?? task;
   if (fresh.reasons?.includes(reason)) return null;
   const reasons = [...(fresh.reasons ?? []), reason];
   await cdb().tasks.update(task.id, { reasons });
   await cdb().captures.where("[jobId+key]").equals([task.jobId, task.key]).modify({ reasons });
-  if (reason === "authored" || fresh.status !== "skipped" || !fresh.result?.outOfRange) return null;
-  const cap = await cdb().captures.where("[jobId+key]").equals([task.jobId, task.key]).filter((c) => c.excluded === "outOfRange").first();
+  const sel = job.options.selection;
+  if (!sel || fresh.status !== "skipped" || !fresh.errorCode || !(fresh.errorCode in EXCLUDED_TEXT)) return null;
+  const cap = await cdb().captures.where("[jobId+key]").equals([task.jobId, task.key]).filter((c) => !!c.excluded).first();
   if (!cap) {
     // 저장본이 없으면 다시 연다
-    await cdb().tasks.update(task.id, { status: "pending", attempts: 0, notBefore: 0, result: { ...fresh.result, outOfRange: false } });
+    await cdb().tasks.update(task.id, { status: "pending", attempts: 0, notBefore: 0, errorCode: null, errorText: null });
+    return null;
+  }
+  const doc = parseBandHtml(cap.html).documents.find((d) => d.format === "band-post");
+  if (!doc) return null;
+  const v = judgePost(doc, reasons, sel, cap.commentsShown === null || cap.commentsShown <= cap.commentsFound);
+  const judged = { confirmed: v.confirmed, matches: v.matches?.map(({ where, index, terms }) => ({ where, index, terms })) };
+  if (!v.include) {
+    await cdb().captures.update(cap.id, { excluded: v.excluded });
+    await cdb().tasks.update(task.id, { errorCode: v.excluded, errorText: EXCLUDED_TEXT[v.excluded!], result: { ...fresh.result, ...judged } });
     return null;
   }
   const partial = cap.commentsShown !== null && cap.commentsShown !== cap.commentsFound;
@@ -89,7 +106,7 @@ async function addReason(task: Task, reason: SelectReason): Promise<Capture | nu
     status: partial ? "partial" : "succeeded",
     errorCode: partial ? "countMismatch" : null,
     errorText: partial ? `표시된 댓글 ${cap.commentsShown}개 중 ${cap.commentsFound}개만 화면에 있었습니다(접힌 댓글 미로딩 가능).` : null,
-    result: { ...fresh.result, outOfRange: false, commentsShown: cap.commentsShown, commentsFound: cap.commentsFound },
+    result: { ...fresh.result, outOfRange: false, commentsShown: cap.commentsShown, commentsFound: cap.commentsFound, ...judged },
   });
   return { ...cap, excluded: undefined };
 }
@@ -352,6 +369,11 @@ export class Engine {
   private async nextTask(jobId: string, kinds: Task["kind"][]): Promise<Task | null> {
     const now = this.now();
     const pending = await cdb().tasks.where("[jobId+status]").equals([jobId, "pending"]).toArray();
+    // 교집합(AND): 모든 조건의 후보를 다 찾은 뒤에 글을 연다(한 조건에만 걸린 글은 열지 않게, 7.1)
+    if (kinds.includes("post") && (await cdb().jobs.get(jobId))?.options.selection?.combine === "and") {
+      const discovering = await cdb().tasks.where("[jobId+status]").anyOf([jobId, "pending"], [jobId, "inFlight"]).filter((t) => t.kind !== "post").count();
+      if (discovering) return null;
+    }
     const ready = pending.filter((t) => kinds.includes(t.kind) && t.notBefore <= now).sort((a, b) => (a.kind === b.kind ? a.order - b.order : a.kind === "list" ? -1 : 1));
     return ready[0] ?? null;
   }
@@ -398,7 +420,7 @@ export class Engine {
           const exists = await cdb().tasks.where("[jobId+key]").equals([job.id, key]).first();
           if (exists) {
             // 같은 글이 다른 조건으로도 찾아지면 사유만 더한다(원글은 한 번만 연다, 8절)
-            await addReason(exists, reason);
+            await addReason(exists, reason, job);
             continue;
           }
           const before = job.options.skipCaptured ? await findCapture(key, job.id) : undefined;
@@ -460,7 +482,8 @@ export class Engine {
     const br = this.deps.browser;
     const sel = job.options.selection;
     if (!b || b.kind !== "member-list" || !br.readMemberComments || !sel) return { ok: false, code: "navigationFailed", text: "멤버 댓글 목록 주소가 아닙니다.", retry: false };
-    const wantLinks = sel.commentedPosts;
+    // 원글 연결: 댓글 단 글(C), 또는 교집합에서 '조건을 만족한 원글의 댓글'만 남기려면 댓글만(B)에도 필요(4.3)
+    const wantLinks = sel.commentedPosts || (sel.combine === "and" && sel.commentsOnly);
     await this.gate();
     await br.openList(task.url);
     let memberName = task.result?.memberName ?? null;
@@ -624,7 +647,7 @@ export class Engine {
     await cdb().transaction("rw", [cdb().tasks, cdb().captures], async () => {
       const exists = await cdb().tasks.where("[jobId+key]").equals([job.id, key]).first();
       if (exists) {
-        revived = await addReason(exists, reason);
+        revived = await addReason(exists, reason, job);
         return;
       }
       const order = (await cdb().tasks.where("jobId").equals(job.id).count()) + 1;
@@ -670,6 +693,15 @@ export class Engine {
   // ---------- 글 하나 ----------
 
   private async runPost(job: Job, task: Task, diag: DiagRecorder): Promise<{ ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" }> {
+    const sel0 = job.options.selection;
+    if (sel0?.combine === "and") {
+      const need: SelectReason[] = [sel0.authored ? "authored" : null, sel0.commentedPosts ? "commented" : null, sel0.search ? "search" : null].filter((x): x is SelectReason => !!x);
+      const have = (await cdb().tasks.get(task.id))?.reasons ?? task.reasons ?? [];
+      if (!need.every((r) => have.includes(r))) {
+        await cdb().tasks.update(task.id, { status: "skipped", leaseUntil: 0, errorCode: "notAll", errorText: "모든 조건(교집합)의 후보에 들지 않아 열지 않았습니다." });
+        return { ok: true };
+      }
+    }
     const target = task.tabId !== undefined ? { tabId: task.tabId } : { url: task.url };
     if (task.tabId === undefined) await this.gate();
     const { ex, loadMs } = await this.deps.browser.extractPost(target);
@@ -755,12 +787,7 @@ export class Engine {
     // 기간 조건(작성 시각 기준)
     // 기간: 선택 수집에서는 '인물이 쓴 글'만 글 작성일로 본다. '댓글 단 글'은 댓글 날짜로 이미 골랐다(5절)
     const sel = job.options.selection;
-    const reasons = task.reasons ?? [];
-    const inRange = sel
-      ? reasons.includes("commented") || reasons.includes("search")
-        ? true
-        : periodContains(post.time?.local ?? null, sel.periodFrom, sel.periodTo)
-      : periodContains(post.time?.local ?? null, job.options.periodFrom, job.options.periodTo);
+    const inRange = sel ? true : periodContains(post.time?.local ?? null, job.options.periodFrom, job.options.periodTo);
     const canonical = ex.postHref ? parseBandUrl(ex.postHref) : parseBandUrl(task.url);
     const key = canonical?.kind === "post" ? postKey(canonical.bandNo, canonical.postNo) : task.key;
     if (inRange === false && !sel) {
@@ -768,8 +795,9 @@ export class Engine {
       await cdb().tasks.update(task.id, { status: "skipped", leaseUntil: 0, key, result: { title: doc.title, outOfRange: true } });
       return { ok: true };
     }
-    // 선택 수집: 기간 밖이어도 저장본은 남겨 두고 결과에서만 뺀다(나중에 '댓글 단 글'로 대상이 되면 다시 열지 않음)
-    const excluded = inRange === false;
+    // 선택 수집: 조건 판정(judgePost)에서 빠져도 저장본은 남겨 두고 결과에서만 뺀다(나중에 다른 조건으로 대상이 되면 다시 열지 않음)
+    const commentsComplete = ex.commentsShown === null || ex.commentsShown <= foundComments;
+    let verdict: PostVerdict | null = null;
 
     const capture: Capture = {
       id: crypto.randomUUID(),
@@ -787,7 +815,6 @@ export class Engine {
       commentsFound: foundComments,
       collectorVersion: COLLECTOR_VERSION,
       reasons: task.reasons,
-      ...(excluded ? { excluded: "outOfRange" as const } : {}),
     };
     const partial = countOk === false;
     try {
@@ -797,10 +824,22 @@ export class Engine {
         // 사유는 저장 시점의 과제에서 다시 읽는다(열어 보는 사이 다른 조건이 더해졌을 수 있음)
         const nowTask = await cdb().tasks.get(task.id);
         capture.reasons = nowTask?.reasons ?? task.reasons;
-        if (excluded && capture.reasons && capture.reasons.some((r) => r !== "authored")) delete capture.excluded;
+        if (sel) {
+          verdict = judgePost(doc, capture.reasons ?? [], sel, commentsComplete);
+          if (!verdict.include) capture.excluded = verdict.excluded;
+        }
         await cdb().captures.add(capture);
+        const judged = verdict ? { confirmed: verdict.confirmed, matches: verdict.matches?.map(({ where, index, terms }) => ({ where, index, terms })) } : {};
         if (capture.excluded) {
-          await cdb().tasks.update(task.id, { status: "skipped", leaseUntil: 0, key, url: capture.url, result: { title: doc.title, outOfRange: true, commentsShown: ex.commentsShown, commentsFound: foundComments } });
+          await cdb().tasks.update(task.id, {
+            status: "skipped",
+            leaseUntil: 0,
+            key,
+            url: capture.url,
+            errorCode: capture.excluded,
+            errorText: EXCLUDED_TEXT[capture.excluded],
+            result: { title: doc.title, outOfRange: capture.excluded === "outOfRange", commentsShown: ex.commentsShown, commentsFound: foundComments, ...judged },
+          });
           return;
         }
         await cdb().tasks.update(task.id, {
@@ -810,7 +849,7 @@ export class Engine {
           leaseUntil: 0,
           errorCode: partial ? "countMismatch" : null,
           errorText: partial ? `표시된 댓글 ${ex.commentsShown}개 중 ${foundComments}개만 화면에 있었습니다(접힌 댓글 미로딩 가능).` : null,
-          result: { title: doc.title, commentsShown: ex.commentsShown, commentsFound: foundComments },
+          result: { title: doc.title, commentsShown: ex.commentsShown, commentsFound: foundComments, ...judged },
         });
         if (!job.bandName && ex.bandName) await cdb().jobs.update(job.id, { bandName: ex.bandName, bandNo: capture.bandNo || job.bandNo });
       });
@@ -928,6 +967,8 @@ export async function createJob(input: {
       if (sel.authored) selLists.push({ url: `${base}/post`, kind: "list", reason: "authored", memberKey: m.memberKey });
       if (sel.commentsOnly || sel.commentedPosts) selLists.push({ url: `${base}/comment`, kind: "comments", reason: "commented", memberKey: m.memberKey });
     }
+    // 검색 결과: 사용자가 연 주소를 그대로(검색어·조건을 일반 주소 정리로 잃지 않게, 4.2)
+    if (sel.search) selLists.push({ url: sel.search.url, kind: "list", reason: "search", memberKey: "" });
   }
   const now = input.now ?? Date.now();
   const job: Job = {
@@ -953,7 +994,7 @@ export async function createJob(input: {
   const base = { jobId: job.id, status: "pending" as const, attempts: 0, errorCode: null, errorText: null, leaseUntil: 0, notBefore: 0 };
   for (const l of input.lists ?? []) tasks.push({ ...base, id: crypto.randomUUID(), key: `list:${l}`, kind: "list", url: l, listReason: "list", order: order++ });
   for (const l of selLists)
-    tasks.push({ ...base, id: crypto.randomUUID(), key: `${l.kind}:${l.url}`, kind: l.kind, url: l.url, listReason: l.reason, memberKey: l.memberKey, order: order++ });
+    tasks.push({ ...base, id: crypto.randomUUID(), key: `${l.kind}:${l.url}`, kind: l.kind, url: l.url, listReason: l.reason, memberKey: l.memberKey || undefined, order: order++ });
   for (const p of input.posts ?? [])
     tasks.push({ ...base, id: crypto.randomUUID(), key: p.key, kind: "post", url: p.url, tabId: p.tabId, reasons: ["url"], order: order++ });
   await cdb().transaction("rw", [cdb().jobs, cdb().tasks, cdb().captures], async () => {

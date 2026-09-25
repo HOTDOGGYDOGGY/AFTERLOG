@@ -7,7 +7,7 @@ import { createJob, DEFAULT_OPTIONS, Engine } from "./engine";
 import { exportJob } from "./exporter";
 import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnostics/recorder";
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
-import { parseBandUrl, parseMemberUrl, parsePostUrlList, postKey } from "./urls";
+import { parseBandUrl, parseMemberUrl, parsePostUrlList, parseSearchUrl, postKey } from "./urls";
 import { describeSelection } from "./selection";
 import { blocksToPlainText, parseBandHtml } from "../../src/importers/band/html";
 import "./collector.css";
@@ -110,7 +110,7 @@ function Manager() {
     }
     const kind = params.get("new");
     if (kind === "form") history.replaceState(null, "", location.pathname);
-    if (kind !== "post" && kind !== "list" && kind !== "sel") return;
+    if (kind !== "post" && kind !== "list" && kind !== "sel" && kind !== "search") return;
     autostarted.current = true;
     void (async () => {
       const created = await jobFromPage(kind, params.get("url") ?? "", Number(params.get("tabId")) || undefined, params.get("modes") ?? "");
@@ -198,7 +198,24 @@ function Manager() {
 }
 
 /** 밴드 화면의 저장 막대(content.js)가 연 요청을 작업으로 만든다. 주소는 밴드 주소만 받는다. 같은 작업이 진행 중이면 그 작업으로 연결한다(6절) */
-export async function jobFromPage(kind: "post" | "list" | "sel", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+export async function jobFromPage(kind: "post" | "list" | "sel" | "search", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+  if (kind === "search") {
+    const q = parseSearchUrl(rawUrl);
+    if (!q) return { error: "밴드 검색 결과 화면에서만 쓸 수 있습니다." };
+    const selection: Selection = {
+      members: [],
+      authored: false,
+      commentsOnly: false,
+      commentedPosts: false,
+      periodFrom: null,
+      periodTo: null,
+      search: { url: q.url, keywords: q.keywords, match: "any", exclude: [], fields: "body" },
+    };
+    const same = await findSameJob((j) => j.scope === "selection" && JSON.stringify(j.options.selection) === JSON.stringify(selection));
+    if (same) return { id: same.id };
+    const job = await createJob({ scope: "selection", label: describeSelection(selection), options: { ...DEFAULT_OPTIONS, selection }, bandNo: q.bandNo });
+    return { id: job.id };
+  }
   if (kind === "sel") {
     const m = parseMemberUrl(rawUrl);
     if (!m) return { error: "인물(멤버) 화면에서만 인물 선택 저장을 쓸 수 있습니다." };
@@ -251,15 +268,23 @@ type NewMode = "urls" | "list" | "person";
 
 function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; initialListUrl?: string | null }) {
   const initialMember = initialListUrl ? parseMemberUrl(initialListUrl) : null;
-  const [mode, setMode] = useState<NewMode>(initialMember ? "person" : initialListUrl ? "list" : "urls");
+  // 검색 결과 화면에서 연 경우(경로에 search 또는 검색어 매개변수)
+  const initialSearch = initialListUrl && !initialMember && /\/search|[?&](keyword|query|q|searchKeyword)=/.test(initialListUrl) ? parseSearchUrl(initialListUrl) : null;
+  const [mode, setMode] = useState<NewMode>(initialMember || initialSearch ? "person" : initialListUrl ? "list" : "urls");
+  const [searchUrl, setSearchUrl] = useState(initialSearch?.url ?? "");
+  const [keywords, setKeywords] = useState(initialSearch?.keywords.join(", ") ?? "");
+  const [exclude, setExclude] = useState("");
+  const [matchAll, setMatchAll] = useState(false);
+  const [withComments, setWithComments] = useState(false);
+  const [combineAnd, setCombineAnd] = useState(false);
   const [urls, setUrls] = useState("");
   const [listUrl, setListUrl] = useState(() => {
-    const u = initialListUrl && !initialMember ? parseBandUrl(initialListUrl) : null;
+    const u = initialListUrl && !initialMember && !initialSearch ? parseBandUrl(initialListUrl) : null;
     if (!u) return "";
     return u.kind === "member-list" ? u.canonical : `${u.origin.replace("://www.", "://")}/band/${u.bandNo}`;
   });
   const [people, setPeople] = useState(initialMember ? `${initialMember.origin}/band/${initialMember.bandNo}/member/${initialMember.memberKey}` : "");
-  const [modes, setModes] = useState({ authored: true, commentsOnly: false, commentedPosts: true });
+  const [modes, setModes] = useState(initialSearch ? { authored: false, commentsOnly: false, commentedPosts: false } : { authored: true, commentsOnly: false, commentedPosts: true });
   const [opts, setOpts] = useState({ ...DEFAULT_OPTIONS });
   const [err, setErr] = useState<string | null>(null);
   const parsed = useMemo(() => parsePostUrlList(urls), [urls]);
@@ -271,7 +296,17 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
     }
     return out;
   }, [people]);
-  const selection: Selection = { members, ...modes, periodFrom: opts.periodFrom, periodTo: opts.periodTo };
+  const terms = (x: string) => [...new Set(x.split(/[,\n]/).map((t) => t.trim()).filter(Boolean))];
+  const sq = searchUrl.trim() ? parseSearchUrl(searchUrl) : null;
+  const postConds = (members.length ? [modes.authored, modes.commentedPosts].filter(Boolean).length : 0) + (sq ? 1 : 0);
+  const selection: Selection = {
+    members: members.length && (modes.authored || modes.commentsOnly || modes.commentedPosts) ? members : [],
+    ...(members.length ? modes : { authored: false, commentsOnly: false, commentedPosts: false }),
+    periodFrom: opts.periodFrom,
+    periodTo: opts.periodTo,
+    search: sq ? { url: sq.url, keywords: terms(keywords), match: matchAll ? "all" : "any", exclude: terms(exclude), fields: withComments ? "bodyAndComments" : "body" } : null,
+    combine: combineAnd && postConds >= 2 ? "and" : "or",
+  };
 
   const submit = async () => {
     setErr(null);
@@ -294,22 +329,23 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
       const job = await createJob({ scope: "list", label: u.kind === "feed" ? "밴드 글 목록" : "멤버 작성글 목록", options: opts, bandNo: u.bandNo, lists: [u.canonical] });
       onCreated(job.id);
     } else {
-      if (!members.length) return setErr("인물 프로필 주소(https://band.us/band/숫자/member/…)를 한 줄에 하나씩 넣어 주세요. 밴드에서 인물 사진을 눌러 연 화면의 주소입니다.");
-      if (!modes.authored && !modes.commentsOnly && !modes.commentedPosts) return setErr("수집할 항목을 하나 이상 골라 주세요.");
+      if (searchUrl.trim() && !sq) return setErr("검색 결과 주소는 밴드 안의 주소여야 합니다(밴드에서 검색한 뒤 주소창의 주소).");
+      if (!members.length && !sq) return setErr("인물 프로필 주소(https://band.us/band/숫자/member/…)나 검색 결과 주소를 넣어 주세요. 인물 주소는 밴드에서 인물 사진을 눌러 연 화면의 주소입니다.");
+      if (members.length && !modes.authored && !modes.commentsOnly && !modes.commentedPosts) return setErr("인물에 대해 수집할 항목을 하나 이상 골라 주세요.");
       // 선택 수집의 기간은 모드별 기준으로 판단하므로(5절) 일반 기간 조건은 쓰지 않는다
       const job = await createJob({
         scope: "selection",
         label: describeSelection(selection),
         options: { ...opts, periodFrom: null, periodTo: null, selection },
-        bandNo: members[0].bandNo,
+        bandNo: members[0]?.bandNo ?? sq!.bandNo,
       });
       onCreated(job.id);
     }
   };
 
   const summary =
-    mode === "person" && members.length
-      ? `${describeSelection(selection)} · ${modes.commentedPosts || modes.authored ? "원글 및 전체 댓글" : "댓글만"} · ${opts.includeImages ? "이미지는 뒤에서 받기" : "이미지 제외"}`
+    mode === "person" && (members.length || sq)
+      ? `${describeSelection(selection)} · ${modes.commentedPosts || modes.authored || sq ? "원글 및 전체 댓글" : "댓글만"} · ${opts.includeImages ? "이미지는 뒤에서 받기" : "이미지 제외"}`
       : null;
 
   return (
@@ -319,7 +355,7 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
       <div className="seg" role="radiogroup" aria-label="수집 대상">
         {(
           [
-            ["person", "인물 선택"],
+            ["person", "인물·검색 선택"],
             ["list", "목록에서 글 찾기"],
             ["urls", "글 주소 여러 개"],
           ] as [NewMode, string][]
@@ -346,7 +382,7 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
       ) : (
         <>
           <label className="field">
-            <span>인물 프로필 주소 (한 줄에 하나, 여러 명 가능)</span>
+            <span>인물 프로필 주소 (한 줄에 하나, 여러 명 가능 · 검색만 할 때는 비워 둠)</span>
             <textarea rows={3} value={people} onChange={(e) => setPeople(e.target.value)} placeholder="https://band.us/band/12345/member/…" />
             <small className="muted">
               인식한 인물 {members.length}명. 인물은 이름이 아니라 밴드의 멤버 식별자로 구분합니다(같은 이름의 다른 사람과 섞이지 않음). 한 계정을 여러 캐릭터가 함께 쓰면 계정 기준으로 모입니다.
@@ -367,6 +403,48 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
               밴드 전체 목록을 먼저 훑지 않고, 인물의 작성글·작성댓글 목록에서 필요한 글만 찾아 엽니다. 댓글 단 글은 댓글 목록 항목을 눌러 원글을 확인합니다(누르기만 하고 아무것도 쓰지 않음).
             </small>
           </fieldset>
+          <fieldset className="filter-box">
+            <legend>검색어가 들어간 글 (선택)</legend>
+            <label className="field">
+              <span>검색 결과 주소 — 밴드에서 검색한 뒤 주소창의 주소</span>
+              <input value={searchUrl} onChange={(e) => setSearchUrl(e.target.value)} placeholder="밴드 검색 결과 화면의 주소" />
+            </label>
+            <div className="row">
+              <label className="field">
+                <span>다시 확인할 검색어 (쉼표로 여러 개, 비우면 밴드 검색 결과를 그대로)</span>
+                <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="예: 등대, 항구" />
+              </label>
+              <label className="field">
+                <span>제외어 (선택)</span>
+                <input value={exclude} onChange={(e) => setExclude(e.target.value)} placeholder="예: 공지" />
+              </label>
+            </div>
+            <div className="row">
+              <label className="check">
+                <input type="checkbox" checked={matchAll} onChange={(e) => setMatchAll(e.target.checked)} /> 검색어 모두 포함(같은 본문·같은 댓글 안에서)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={withComments} onChange={(e) => setWithComments(e.target.checked)} /> 댓글도 검사(더 오래 걸릴 수 있음)
+              </label>
+            </div>
+            <small className="muted">
+              검색 결과에서 찾은 글을 열어 본문(선택 시 댓글)에서 검색어를 다시 확인합니다. 인물 이름·소개에만 있는 단어는 일치로 보지 않고, 불러오지 못한 댓글은 '판단 불가'로 따로 둡니다. 결과는 그
+              검색 결과에서 확보한 범위이며 밴드 전체 검색을 보장하지 않습니다.
+            </small>
+          </fieldset>
+          {postConds >= 2 ? (
+            <div className="ui-seg-row">
+              <span className="small">조건 조합</span>
+              <div className="seg" role="radiogroup" aria-label="조건 조합">
+                <button type="button" role="radio" aria-checked={!combineAnd} aria-pressed={!combineAnd} onClick={() => setCombineAnd(false)}>
+                  하나라도 맞으면 (합집합)
+                </button>
+                <button type="button" role="radio" aria-checked={combineAnd} aria-pressed={combineAnd} onClick={() => setCombineAnd(true)}>
+                  모두 맞아야 (교집합)
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
       <div className="row">
@@ -407,7 +485,8 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
           <li>글 목록 스크롤로 글 찾기: 지원 — 합성 화면에서 통과, 실제 밴드에서 목록 끝까지 확인</li>
           <li>인물 선택(쓴 글·쓴 댓글·댓글 단 글): 합성 화면에서 통과. 멤버 댓글 목록 구조는 저장 샘플로 확인했지만, 항목을 눌러 원글을 여는 동작은 <b>실제 밴드에서 미검증</b></li>
           <li>접힌 댓글 자동 펼치기: 미지원. 표시 댓글 수와 비교해 '일부 확보'로 알려 줍니다</li>
-          <li>검색 결과 수집, 조건 교집합(AND): 준비 중</li>
+          <li>검색 결과 수집: 사용자가 연 검색 결과 화면에서 글을 찾고 본문에서 검색어를 다시 확인. 실제 밴드 검색 화면 구조는 <b>미검증</b>(자동 검색 입력은 아직 없음)</li>
+          <li>조건 교집합(AND): 모든 후보를 찾은 뒤 모든 조건에 든 글만 엶</li>
           <li>표정 종류·반응자, 프로필·스토리, 채팅: 아직 미지원</li>
         </ul>
       </details>
@@ -528,7 +607,7 @@ function JobView({
           <div key={l.id} className="stat wide">
             <b>{l.result?.found ?? 0}</b>
             <span>
-              {l.listReason === "authored" ? "인물이 쓴 글" : "목록에서 찾은 글"} · {l.status === "succeeded" ? (l.result?.coverage === "unknown" ? "끝 확인 불가" : l.result?.coverage === "partial" ? "일부만 탐색" : "끝") : "찾는 중"}
+              {l.listReason === "authored" ? "인물이 쓴 글" : l.listReason === "search" ? "검색 결과에서 찾은 글" : "목록에서 찾은 글"} · {l.status === "succeeded" ? (l.result?.coverage === "unknown" ? "끝 확인 불가" : l.result?.coverage === "partial" ? "일부만 탐색" : "끝") : "찾는 중"}
             </span>
           </div>
         ))}
@@ -673,6 +752,9 @@ function PostRow({ n, task, capture, open, onToggle, job }: { n: number; task: T
         </td>
         <td>{c?.commentsFound !== undefined ? `${c.commentsShown ?? "?"} / ${c.commentsFound}` : ""}</td>
         <td className="small">
+          {c?.matches?.length ? (
+            <span className="reason-tags">일치: {c.matches.map((m) => `${m.where === "body" ? "본문" : `댓글 ${m.index + 1}`} ${m.terms.join("·")}`).join(", ")}</span>
+          ) : null}
           {task.errorText ?? (c?.outOfRange ? "기간 밖" : "")}
           {capture ? (
             <button type="button" className="ui-link small" onClick={onToggle}>

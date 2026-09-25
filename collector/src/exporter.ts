@@ -166,7 +166,11 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
   const obs = await cdb().comments.where("jobId").equals(jobId).toArray();
   if (job.options.selection?.commentsOnly) {
     for (const t of tasks.filter((x) => x.kind === "comments")) {
-      const mine = obs.filter((o) => o.taskId === t.id && o.inRange !== false).sort((a, b) => a.seq - b.seq);
+      // 교집합(AND)이면 조건을 만족한(결과에 든) 원글에 연결된 댓글만(4.3)
+      const included = new Set(caps.map((c) => c.key));
+      const mine = obs
+        .filter((o) => o.taskId === t.id && o.inRange !== false && (job.options.selection?.combine !== "and" || (!!o.postKey && included.has(o.postKey))))
+        .sort((a, b) => a.seq - b.seq);
       if (!mine.length) continue;
       const name = t.result?.memberName ?? mine[0].memberName ?? "";
       const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;");

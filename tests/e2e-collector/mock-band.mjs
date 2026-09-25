@@ -62,6 +62,12 @@ const band = http.createServer((req, res) => {
       while(feed.children.length>12)feed.firstElementChild.remove();window.__loading=false},400)}});`;
     return send(200, page(`<div id="feed">${items(0, 8)}</div>`, script));
   }
+  // 검색 결과(실제 주소 형식은 미확인. 검색어가 본문에 들어간 글 목록)
+  if (url.pathname === `/band/${BAND}/search`) {
+    const k = url.searchParams.get("keyword") ?? "";
+    const hit = Array.from({ length: TOTAL }, (_, i) => TOTAL - i).filter((n) => n !== 21 && k && `${n}번 글의 첫 줄 대사.`.includes(k));
+    return send(200, page(`<h2>'${k}' 검색 결과</h2><div id="feed">${hit.map((n) => `<div class="feed-item" style="height:220px">${itemHtml(n)}</div>`).join("")}</div>`));
+  }
   // 인물(멤버) 화면: 프로필 · 작성글 목록 · 작성댓글 목록(실제 저장 샘플과 같은 구조)
   m = url.pathname.match(new RegExp(`^/band/${BAND}/member/(MK[A-Z]+)(?:/(post|comment))?$`));
   if (m) {

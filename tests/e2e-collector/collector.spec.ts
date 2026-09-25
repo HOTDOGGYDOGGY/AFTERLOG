@@ -285,12 +285,32 @@ test("골라서 저장…: 인물 화면에서 열면 인물 선택 화면이 �
   await band.locator("#afterlog-collector-bar").getByRole("button", { name: "골라서 저장…" }).click();
   const mgr = await mgrPromise;
   await mgr.waitForLoadState();
-  await expect(mgr.getByRole("radio", { name: "인물 선택" })).toHaveAttribute("aria-checked", "true");
+  await expect(mgr.getByRole("radio", { name: "인물·검색 선택" })).toHaveAttribute("aria-checked", "true");
   await expect(mgr.getByPlaceholder("https://band.us/band/12345/member/…")).toHaveValue(`${BAND}/member/MKDAON`);
   await expect(mgr.getByText("인식한 인물 1명")).toBeVisible();
   await mgr.getByLabel(/이 인물이 쓴 댓글만/).check();
   await expect(mgr.locator(".notice", { hasText: "선택한 인물의 쓴 글·쓴 댓글·댓글 단 글" })).toBeVisible();
   await mgr.screenshot({ path: `${OUT}/07-selection-form.png`, fullPage: true });
+  await mgr.close();
+  await band.close();
+});
+
+test("검색 결과(D): 밴드에서 연 검색 결과 '이 검색 결과 저장' → 본문에서 검색어를 다시 확인", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/search?keyword=${encodeURIComponent("7번")}`);
+  const bar = band.locator("#afterlog-collector-bar");
+  await expect(bar.getByRole("button", { name: "검색 조건 수정…" })).toBeVisible();
+  const mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 검색 결과 저장" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 120_000);
+  await expect(mgr.locator(".job-head h2")).toContainText("검색 결과 중 '7번'");
+  // '7번'이 들어간 글: 17·7
+  await expect(mgr.locator(".stat.wide", { hasText: "검색 결과에서 찾은 글" }).locator("b")).toHaveText("2");
+  await expect(mgr.locator("tbody tr")).toHaveCount(2);
+  await expect(mgr.locator("tbody tr").first()).toContainText("일치: 본문 7번");
+  await mgr.screenshot({ path: `${OUT}/08-search-finished.png`, fullPage: true });
   await mgr.close();
   await band.close();
 });

@@ -267,3 +267,76 @@ describe("선택 수집 A·B·C", () => {
     expect(text).toContain('"scope": "selection"');
   });
 });
+
+describe("검색 결과(D)·조건 조합", () => {
+  const SEARCH = `https://band.us/band/${BAND}/search?keyword=${encodeURIComponent("31번")}&period=all`;
+  const search = (p: Partial<NonNullable<Selection["search"]>> = {}) => ({ url: SEARCH, keywords: ["31번"], match: "any" as const, exclude: [], fields: "body" as const, ...p });
+
+  it("F09 검색 결과 주소(검색어·조건)를 바꾸지 않고 보관한다", async () => {
+    const job = await createJob({ scope: "selection", label: "t", options: { ...DEFAULT_OPTIONS, selection: sel({ search: search() }) }, bandNo: BAND });
+    const [t] = await cdb().tasks.where("jobId").equals(job.id).toArray();
+    expect(t.url).toBe(SEARCH);
+    expect(t.listReason).toBe("search");
+  });
+
+  it("검색 결과의 글을 열어 본문에서 검색어를 다시 확인: 맞는 글만 결과에, 일치 위치 기록", async () => {
+    const b = new FakeBand([], [31, 32]);
+    const { job, posts } = await run(sel({ search: search() }), b);
+    const p31 = posts.find((p) => p.key.endsWith(":31"))!;
+    const p32 = posts.find((p) => p.key.endsWith(":32"))!;
+    expect(["succeeded", "partial"]).toContain(p31.status);
+    expect(p31.result?.matches).toEqual([{ where: "body", index: 0, terms: ["31번"] }]);
+    expect(p32).toMatchObject({ status: "skipped", errorCode: "noMatch" });
+    const { report } = await exportJob(job.id);
+    expect(report.posts.captured).toBe(1);
+  });
+
+  it("F07 인물 이름·소개에만 있는 단어는 본문 검색 일치가 아니다", async () => {
+    const b = new FakeBand([], [31]);
+    // '가람'은 작성자 이름, 'A / 20 / 학생'은 소개, '본명'은 다른 사람 댓글에만 있다
+    const { posts } = await run(sel({ search: search({ keywords: ["가람", "학생", "본명"] }) }), b);
+    expect(posts[0]).toMatchObject({ status: "skipped", errorCode: "noMatch" });
+  });
+
+  it("F08 댓글을 다 불러오지 못했으면 댓글 검색 '불일치'로 확정하지 않는다(판단 불가)", async () => {
+    // 합성 글은 표시 댓글 수가 실제 확보 수보다 많다(일부 미로딩)
+    const b = new FakeBand([], [31]);
+    const { posts } = await run(sel({ search: search({ keywords: ["어디에도없는말"], fields: "bodyAndComments" }) }), b);
+    expect(posts[0]).toMatchObject({ status: "skipped", errorCode: "unknown" });
+    const b2 = new FakeBand([], [31]);
+    _resetCollectorDbForTests(`sel-${Math.random()}`);
+    const { posts: p2 } = await run(sel({ search: search({ keywords: ["본명"], fields: "bodyAndComments" }) }), b2);
+    expect(p2[0].result?.matches?.[0]).toMatchObject({ where: "comment", terms: ["본명"] });
+  });
+
+  it("제외어·모두 포함은 같은 본문 안에서 판단", async () => {
+    const b = new FakeBand([], [31, 32]);
+    const { posts } = await run(sel({ search: search({ keywords: ["첫 줄", "고개"], match: "all", exclude: ["32번"] }) }), b);
+    expect(posts.find((p) => p.key.endsWith(":31"))!.result?.matches?.[0].terms).toEqual(["첫 줄", "고개"]);
+    expect(posts.find((p) => p.key.endsWith(":32"))).toMatchObject({ status: "skipped", errorCode: "noMatch" });
+  });
+
+  it("F04 A·C·D에 모두 걸린 글: 데이터 하나, 사유 셋", async () => {
+    const b = new FakeBand(ITEMS(), [3]);
+    b.discoverRound = async () => ({ links: [postUrl(3)], scrollHeight: 100, loading: false, atBottom: true, endMarker: false, loginRequired: false });
+    const { job, posts } = await run(sel({ authored: true, commentedPosts: true, search: search({ keywords: ["3번"] }) }), b);
+    expect(posts.filter((p) => p.key.endsWith(":3"))).toHaveLength(1);
+    expect(b.opened.filter((n) => n === 3)).toHaveLength(1);
+    const cap = (await cdb().captures.where("jobId").equals(job.id).toArray()).find((c) => c.key.endsWith(":3"))!;
+    expect(cap.reasons?.sort()).toEqual(["authored", "commented", "search"]);
+  });
+
+  it("교집합(AND): 모든 후보를 찾은 뒤 두 조건에 모두 든 글만 연다. 댓글만(B)은 그 원글에 달린 댓글만", async () => {
+    // A = {3, 20}, C = {3, 8} → 교집합 {3}
+    const b = new FakeBand(ITEMS(), [3, 20]);
+    const { job, posts } = await run(sel({ authored: true, commentedPosts: true, commentsOnly: true, combine: "and" }), b);
+    expect(b.opened).toEqual([3]);
+    expect(posts.find((p) => p.key.endsWith(":20"))).toMatchObject({ status: "skipped", errorCode: "notAll" });
+    expect(posts.find((p) => p.key.endsWith(":8"))).toMatchObject({ status: "skipped", errorCode: "notAll" });
+    const { parts } = await exportJob(job.id);
+    const r = await readArchive(parts.map((p) => p.blob));
+    const comments = r.data.documents.find((d) => d.inputFormat === "band-member-comments")!;
+    // 3번 글에 단 댓글 3개만(8번 글에 단 댓글 제외)
+    expect(Object.keys(comments.entries)).toHaveLength(3);
+  });
+});

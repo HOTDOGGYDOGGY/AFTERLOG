@@ -19,6 +19,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     q.set("new", "sel");
     q.set("modes", msg.act.slice(4));
     q.set("url", sender.tab.url || "");
+  } else if (msg.act === "search") {
+    // 사용자가 연 검색 결과(주소를 그대로 넘긴다)
+    q.set("new", "search");
+    q.set("url", sender.tab.url || "");
   } else if (msg.act === "form") {
     // 조건을 정하는 새 수집 화면(이 밴드 주소를 채워 둠). 바로 시작하지 않는다
     q.set("new", "form");

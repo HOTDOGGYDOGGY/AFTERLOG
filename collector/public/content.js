@@ -23,6 +23,8 @@
     m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)(\/.*)?$/);
     if (m) return { kind: "member", bandNo: m[1] };
     m = u.pathname.match(/^\/band\/(\d+)(\/.*)?$/);
+    // 검색 결과 화면(주소 형식은 실제 화면으로 확인 전: 경로에 search가 있거나 검색어 매개변수가 있을 때)
+    if (m && (/\/search/.test(u.pathname) || /[?&](keyword|query|q|searchKeyword)=/.test(u.search))) return { kind: "search", bandNo: m[1] };
     if (m) return { kind: "band", bandNo: m[1] };
     return null;
   }
@@ -33,6 +35,7 @@
     band: [["list", "이 밴드 글 전체 저장", true], ["form", "골라서 저장…"]],
     member: [["sel:A", "이 인물의 글", true], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["form", "골라서 저장…"]],
     memberComment: [["sel:B", "이 댓글 목록 저장", true], ["sel:BC", "연결된 원글까지"], ["form", "골라서 저장…"]],
+    search: [["search", "이 검색 결과 저장", true], ["form", "검색 조건 수정…"]],
   };
 
   var host = document.createElement("div");
