@@ -10,6 +10,9 @@ import { DIAG_FILE_NAME } from "./diagnostics/serializer";
 import { parseBandUrl, parseMemberUrl, parsePostUrlList, parseSearchUrl, postKey } from "./urls";
 import { describeSelection } from "./selection";
 import { computeOutcome, computeTotals, followUpText } from "./totals";
+import { profileImages } from "../../src/importers/band/profile";
+import { renderProfileHtml } from "../../src/exporters/profileHtml";
+import { blobToDataUrl } from "../../src/exporters/html";
 import { blocksToPlainText, parseBandHtml } from "../../src/importers/band/html";
 import "./collector.css";
 
@@ -111,7 +114,7 @@ function Manager() {
     }
     const kind = params.get("new");
     if (kind === "form") history.replaceState(null, "", location.pathname);
-    if (kind !== "post" && kind !== "list" && kind !== "sel" && kind !== "search") return;
+    if (kind !== "post" && kind !== "list" && kind !== "sel" && kind !== "search" && kind !== "popup") return;
     autostarted.current = true;
     void (async () => {
       const created = await jobFromPage(kind, params.get("url") ?? "", Number(params.get("tabId")) || undefined, params.get("modes") ?? "");
@@ -199,7 +202,14 @@ function Manager() {
 }
 
 /** 밴드 화면의 저장 막대(content.js)가 연 요청을 작업으로 만든다. 주소는 밴드 주소만 받는다. 같은 작업이 진행 중이면 그 작업으로 연결한다(6절) */
-export async function jobFromPage(kind: "post" | "list" | "sel" | "search", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+export async function jobFromPage(kind: "post" | "list" | "sel" | "search" | "popup", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+  if (kind === "popup") {
+    const u = parseBandUrl(rawUrl);
+    if (!u || tabId === undefined) return { error: "밴드 화면의 프로필 팝업에서만 쓸 수 있습니다." };
+    // 팝업은 주소로 다시 열 수 없어 지금 탭에서 한 번 읽는다(같은 작업으로 합치지 않음: 누를 때마다 그때 열린 인물)
+    const job = await createJob({ scope: "profile", label: "프로필(팝업)", options: { ...DEFAULT_OPTIONS, skipCaptured: false }, bandNo: u.bandNo, profiles: [{ url: rawUrl, tabId }] });
+    return { id: job.id };
+  }
   if (kind === "search") {
     const q = parseSearchUrl(rawUrl);
     if (!q) return { error: "밴드 검색 결과 화면에서만 쓸 수 있습니다." };
@@ -540,7 +550,7 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
           <li>접힌 댓글 펼치기: '이전 댓글·답글 더보기'류 버튼만 눌러 불러오고, 누를 때마다 읽은 댓글을 누적 저장(화면에서 사라져도 유지). 멈춘 이유를 코드로 남기며, 원인을 확인하지 못한 부족분을 '삭제됨'으로 단정하지 않음</li>
           <li>검색 결과 수집: 사용자가 연 검색 결과 화면에서 글을 찾고 본문에서 검색어를 다시 확인. 실제 밴드 검색 화면 구조는 <b>미검증</b>(자동 검색 입력은 아직 없음)</li>
           <li>조건 교집합(AND): 모든 후보를 찾은 뒤 모든 조건에 든 글만 엶</li>
-          <li>인물 프로필: 보이는 모습 그대로 보관(사진·소개·스토리 글·숫자·링크). 화면 구조를 해석하지 않은 보관본이며, 이전 프로필 사진 기록·스토리 댓글은 아직 못 모음(실제 화면 샘플 필요)</li>
+          <li>인물 프로필: 기본 정보(이름·소개·사진·커버·가입일·프로필 표정/댓글 수)와 스토리(상세를 열어 전문·표정 수·댓글)를 구조로 저장하고, 보관 당시 화면도 함께 보관. 구조는 사용자 저장 표본으로 확인했고 스토리 댓글 항목 구조와 '이전 댓글' 동작은 <b>실제 밴드에서 미검증</b>. 주소가 그대로인 프로필 팝업은 그 탭에서 기본 정보만 읽음(인물 연결 미확인). 프로필 사진 이력은 화면 표본이 없어 '확인 못 함'</li>
           <li>표정 종류·반응자, 채팅: 아직 미지원</li>
         </ul>
       </details>
@@ -648,17 +658,27 @@ function JobView({
     caps,
     obs,
     job.options.selection,
-    profileTasks.filter((t) => t.status === "succeeded").map((t) => t.url),
+    profileTasks.filter((t) => t.status === "succeeded" || t.status === "partial").map((t) => (t.tabId !== undefined ? t.id : t.url)),
   );
   const { outcome, followUp } = computeOutcome(tasks, obs, assetStat.failed);
   const followText = followUpText(followUp);
   // 내보낼 수 있는 자료가 하나라도 있으면 저장할 수 있다(글이 0개여도 댓글 모음·프로필만으로, 명세 8.1·C07)
   const exportable = totals.posts > 0 || totals.memberComments > 0 || totals.profiles > 0;
 
-  const openProfile = async (taskId: string) => {
+  const openProfile = async (taskId: string, what: "data" | "snapshot") => {
     const p = await cdb().profiles.where("taskId").equals(taskId).first();
     if (!p) return;
-    const url = URL.createObjectURL(new Blob([await profileStandaloneHtml(p)], { type: "text/html;charset=utf-8" }));
+    let html: string;
+    if (what === "data" && p.record) {
+      // 확보한 이미지는 데이터 주소로(인터넷 없이 보임), 못 받은 것은 '미확보'
+      const urls = new Map<string, string>();
+      for (const ref of profileImages(p.record)) {
+        const a = /^https?:/.test(ref.src) ? await cdb().assets.get(ref.src) : undefined;
+        if (a?.status === "stored" && a.blob && !urls.has(ref.src)) urls.set(ref.src, await blobToDataUrl(a.blob));
+      }
+      html = renderProfileHtml(p.record, (i) => urls.get(i.src) ?? null, { generator: `AFTERLOG Collector ${COLLECTOR_VERSION}` });
+    } else html = await profileStandaloneHtml(p);
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     window.open(url, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
@@ -752,22 +772,31 @@ function JobView({
             </span>
           </div>
         ))}
-        {profileTasks.map((t) => (
-          <div key={t.id} className="stat wide">
-            <b>{t.status === "succeeded" ? `스토리 ${t.result?.stories ?? 0}` : TASK_LABEL[t.status]}</b>
-            <span>
-              {t.result?.title ?? "프로필"}
-              {t.status === "succeeded" ? ` · 사진 ${t.result?.images ?? 0}장 · ` : " · "}
-              {t.status === "succeeded" ? (
-                <button type="button" className="ui-link small" onClick={() => void openProfile(t.id)}>
-                  보관본 보기
-                </button>
-              ) : (
-                t.errorText ?? ""
-              )}
-            </span>
-          </div>
-        ))}
+        {profileTasks.map((t) => {
+          const done = t.status === "succeeded" || t.status === "partial";
+          return (
+            <div key={t.id} className="stat wide">
+              <b>{done ? `스토리 ${t.result?.stories ?? 0}` : TASK_LABEL[t.status]}</b>
+              <span>
+                {t.result?.title ?? "프로필"}
+                {done ? ` · 사진 ${t.result?.images ?? 0}장 · ` : " · "}
+                {done ? (
+                  <>
+                    <button type="button" className="ui-link small" onClick={() => void openProfile(t.id, "data")}>
+                      보관본 보기
+                    </button>{" "}
+                    <button type="button" className="ui-link small" onClick={() => void openProfile(t.id, "snapshot")}>
+                      보관 당시 화면
+                    </button>
+                    {t.status === "partial" && t.errorText ? <small className="muted"> · {t.errorText}</small> : null}
+                  </>
+                ) : (
+                  t.errorText ?? ""
+                )}
+              </span>
+            </div>
+          );
+        })}
         {commentLists.map((l) => {
           const mine = obs.filter((o) => o.taskId === l.id);
           const inRange = mine.filter((o) => o.inRange !== false);

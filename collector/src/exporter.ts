@@ -9,6 +9,8 @@ import { sha256Hex } from "../../src/storage/hash";
 import { COLLECTOR_VERSION } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type Task } from "./db";
 import { describeSelection } from "./selection";
+import { BAND_PROFILE_SCHEMA, BAND_PROFILE_SOURCE_KIND, profileImages, type BandProfileRecord } from "../../src/importers/band/profile";
+import { renderProfileHtml } from "../../src/exporters/profileHtml";
 import { computeOutcome, computeTotals, totalsText } from "./totals";
 import { safeName } from "../../src/exporters/fileName";
 
@@ -32,7 +34,7 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
   const failed = posts.filter((t) => t.status === "failed").length;
   const assetsFailed = assets.filter((a) => a!.status === "failed");
   const { outcome, followUp } = computeOutcome(tasks, obs, assetsFailed.length);
-  const profileKeys = tasks.filter((t) => t.kind === "profile" && t.status === "succeeded").map((t) => `${t.url}`);
+  const profileKeys = tasks.filter((t) => t.kind === "profile" && (t.status === "succeeded" || t.status === "partial")).map((t) => (t.tabId !== undefined ? t.id : t.url));
   return {
     collectorVersion: COLLECTOR_VERSION,
     jobId: job.id,
@@ -206,10 +208,17 @@ export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = 
       `<tr><td>${i + 1}</td><td><a href="${encodeURI(name)}">${escapeHtml(d.title)}</a>${d.inputFormat === "band-member-comments" ? " <small>(댓글 모음)</small>" : ""}</td><td>${comments}</td><td>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">밴드에서 열기 ↗</a>` : ""}</td></tr>`,
     );
   }
-  const profileRows = profileFiles.map((f) => {
-    files[f.name] = strToU8(f.html);
-    return `<li><a href="${encodeURI(f.name)}">${escapeHtml(f.p.name ?? "인물")} 프로필</a> · 스토리 ${f.p.stories.length}개 · 사진 ${f.p.imageUrls.length}장 · <a href="${escapeHtml(f.p.url)}" target="_blank" rel="noreferrer">밴드에서 열기 ↗</a></li>`;
-  });
+  for (const f of profileFiles) files[f.name] = strToU8(f.html);
+  // 목차: 구조 자료가 있는 프로필은 그 HTML을, 없으면 보관 화면을 연결한다. 프로필·스토리를 글 수에 섞지 않는다
+  const profileRows = profileFiles
+    .filter((f) => f.kind === "data" || !profileFiles.some((g) => g.kind === "data" && g.p.id === f.p.id))
+    .map((f) => {
+      const r = f.p.record;
+      const snap = profileFiles.find((g) => g.kind === "snapshot" && g.p.id === f.p.id && g !== f);
+      const stories = r ? (r.stories.state === "collected" ? `스토리 ${r.stories.items.length}개 · 스토리 댓글 ${r.stories.items.reduce((n, x) => n + x.comments.length, 0)}개` : "스토리 수집 안 함·확인 못 함") : `스토리 ${f.p.stories.length}개(보관 화면 기준)`;
+      const url = r?.profileUrl ?? f.p.url;
+      return `<li><a href="${encodeURI(f.name)}">${escapeHtml(r?.name ?? f.p.name ?? "인물")} 프로필</a> · ${stories}${snap ? ` · <a href="${encodeURI(snap.name)}">보관 당시 화면</a>` : ""} · <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${r?.profileUrl ? "밴드에서 열기 ↗" : "원래 화면 열기 ↗"}</a>${r?.identity === "unconfirmed" ? " <small>(인물 연결 미확인)</small>" : ""}</li>`;
+    });
   const t = report.totals;
   files["index.html"] = strToU8(`<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="AFTERLOG Collector">
@@ -339,27 +348,71 @@ async function buildJobDocuments(jobId: string) {
     }
   }
 
-  // 인물 프로필 보관본: 혼자 열리는 HTML로 원문 칸에(앱의 '인물 프로필 보관'에서 연다)
+  // 인물 프로필: 구조 자료(JSON, 앱·확장이 같은 해석기 형식) + 보관 당시 화면(혼자 열리는 HTML)
   const profiles = await cdb().profiles.where("jobId").equals(jobId).toArray();
-  const profileFiles: { name: string; html: string; p: ProfileCapture }[] = [];
+  const profileFiles: { name: string; html: string; p: ProfileCapture; kind: "data" | "snapshot" }[] = [];
+  const addAsset = async (url: string): Promise<{ id: string; data: Blob; mime: string; sha256: string } | null> => {
+    const a = await cdb().assets.get(url);
+    if (!a || a.status !== "stored" || !a.blob || !a.sha256) return null;
+    let asset = bySha.get(a.sha256);
+    if (!asset) {
+      asset = { id: crypto.randomUUID(), name: imageRefFromSrc(url) ?? "image", mime: a.mime ?? a.blob.type, size: a.size, sha256: a.sha256, data: a.blob };
+      bySha.set(a.sha256, asset);
+    }
+    return { id: asset.id, data: a.blob, mime: asset.mime, sha256: a.sha256 };
+  };
+  const { blobToDataUrl } = await import("../../src/exporters/html");
   for (const p of profiles) {
-    const html = await profileStandaloneHtml(p);
-    const bytes = new TextEncoder().encode(html);
-    const name = `프로필_${safeName(p.name ?? p.memberKey).slice(0, 40)}.html`;
-    profileFiles.push({ name, html, p });
+    const base = `프로필_${safeName(p.name ?? p.record?.name ?? (p.memberKey || "인물")).slice(0, 40)}`;
+    let snapshotName: string | null = null;
+    if (p.surface !== "profilePopup" && p.html) {
+      const html = await profileStandaloneHtml(p);
+      const bytes = new TextEncoder().encode(html);
+      snapshotName = `${base}_보관화면.html`;
+      profileFiles.push({ name: snapshotName, html, p, kind: "snapshot" });
+      sources.push({
+        id: crypto.randomUUID(),
+        fileName: snapshotName,
+        mime: "text/html",
+        importedAt: p.capturedAt,
+        parserVersion: "profile-snapshot/1",
+        sha256: await sha256Hex(bytes),
+        kind: "band-profile-snapshot",
+        sourceUrl: p.url,
+        data: bytes,
+      });
+    }
+    if (!p.record) continue;
+    // 이미지 참조에 확보한 파일의 해시를 적는다(원본 주소 → 파일). 못 받은 것은 해시 없이 '미확보'
+    const record: BandProfileRecord = JSON.parse(JSON.stringify(p.record));
+    const dataUrls = new Map<string, string>();
+    for (const ref of profileImages(record)) {
+      const got = /^https?:/.test(ref.src) ? await addAsset(ref.src) : null;
+      ref.sha256 = got?.sha256 ?? null;
+      if (got && !dataUrls.has(ref.src)) dataUrls.set(ref.src, await blobToDataUrl(got.data));
+    }
+    const json = JSON.stringify(record);
+    const bytes = new TextEncoder().encode(json);
     sources.push({
       id: crypto.randomUUID(),
-      fileName: name,
-      mime: "text/html",
+      fileName: `${base}.json`,
+      mime: "application/json",
       importedAt: p.capturedAt,
-      parserVersion: "profile-snapshot/1",
+      parserVersion: BAND_PROFILE_SCHEMA,
       sha256: await sha256Hex(bytes),
-      kind: "band-profile-snapshot",
-      sourceUrl: p.url,
+      kind: BAND_PROFILE_SOURCE_KIND,
+      sourceUrl: record.profileUrl ?? p.url,
       data: bytes,
+    });
+    profileFiles.push({
+      name: `${base}.html`,
+      html: renderProfileHtml(record, (i) => dataUrls.get(i.src) ?? null, { generator: `AFTERLOG Collector ${COLLECTOR_VERSION}`, snapshotHref: snapshotName ? encodeURI(snapshotName) : null }),
+      p,
+      kind: "data",
     });
   }
   const report = await buildReport(job, tasks, caps, exportedAt, obs);
-  if (profiles.length) report.profiles = profiles.map((p) => ({ name: p.name, url: p.url, stories: p.stories.length, images: p.imageUrls.length, capturedAt: p.capturedAt }));
+  if (profiles.length)
+    report.profiles = profiles.map((p) => ({ name: p.record?.name ?? p.name, url: p.record?.profileUrl ?? p.url, stories: p.record ? p.record.stories.items.length : p.stories.length, images: p.imageUrls.length, capturedAt: p.capturedAt }));
   return { job, documents, assets: [...bySha.values()], sources, report, projectId, exportedAt, docUrls, profileFiles };
 }

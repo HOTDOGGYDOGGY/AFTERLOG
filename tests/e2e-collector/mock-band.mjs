@@ -84,31 +84,64 @@ const band = http.createServer((req, res) => {
     const hit = Array.from({ length: TOTAL }, (_, i) => TOTAL - i).filter((n) => n !== 21 && k && `${n}번 글의 첫 줄 대사.`.includes(k));
     return send(200, page(`<h2>'${k}' 검색 결과</h2><div id="feed">${hit.map((n) => `<div class="feed-item" style="height:220px">${itemHtml(n)}</div>`).join("")}</div>`));
   }
+  // 멤버 목록: 이름을 누르면 주소 변화 없이 프로필 팝업(실제 저장 표본 구조, 링크는 모두 '#')
+  if (url.pathname === `/band/${BAND}/member`) {
+    const people = [["나래", "avatar_narae.png", 0], ["다온", "avatar_garam.png", 2]];
+    const popup = (i) => `<div data-viewname="DProfileLayoutView" class="lyWrap layer_wrap" style="position:fixed;inset:0;background:#0008"><div class="lyContent -layerProfileCardStyle" style="background:#fff;width:355px;margin:60px auto;padding:16px"><div data-viewname="DProfileLayerView" class="_dProfileView">
+      <div class="layerOptionBox"><div class="joinInfoBox"><p class="joinInfo">2020년 3월 1일 가입</p></div><button type="button" class="closeButton _btnClose">닫기</button></div>
+      <div class="cProfileViewCard"><div class="infoBox"><a href="/band/${BAND}/member#" class="imgBox _imgAnchor"><img class="profileImage _profileImage" src="http://127.0.0.1:4589/img/${people[i][1]}" width="80"></a><strong class="userName">${people[i][0]}</strong>
+        <div data-viewname="DProfileDescriptionView"><span class="userNickname _userDesc">팝업 소개 ${i + 1}</span><div class="optionInfo _userInfo"></div></div></div>
+        <div class="sideBox"><button type="button" class="like _likeEmotionRegion trap"><div class="_emotionCount"></div></button><a href="/band/${BAND}/member#" class="comment _commentBtn"><div class="_commentCountRegion"></div></a></div></div>
+      <div data-viewname="DProfileStoryCountView"><a class="profileStoryMoveButton _storyAnchor trap" href="/band/${BAND}/member#"><span class="title">스토리 보기</span><span class="subText">전체글 <em class="count">${people[i][2]}</em></span></a></div></div>
+      <button type="button" class="btnNext _nextProfileBtn trap">다음 프로필</button></div></div>`;
+    const script = `window.__traps=0;document.addEventListener('click',e=>{if(e.target.closest('.trap'))window.__traps++},true);
+      const P=${JSON.stringify([popup(0), popup(1)])};
+      document.querySelectorAll('.memberItem').forEach((b,i)=>b.addEventListener('click',()=>{document.querySelectorAll('[data-viewname=DProfileLayoutView]').forEach(x=>x.remove());document.body.insertAdjacentHTML('beforeend',P[i]);document.querySelector('[data-viewname=DProfileLayoutView] ._btnClose').addEventListener('click',()=>document.querySelector('[data-viewname=DProfileLayoutView]').remove())}));`;
+    return send(200, page(`<ul class="memberList">${people.map((p) => `<li><button type="button" class="memberItem">${p[0]}</button></li>`).join("")}</ul>`, script));
+  }
   // 인물(멤버) 화면: 프로필 · 작성글 목록 · 작성댓글 목록(실제 저장 샘플과 같은 구조)
   m = url.pathname.match(new RegExp(`^/band/${BAND}/member/(MK[A-Z]+)(?:/(post|comment|profile))?$`));
   if (m) {
     const key = m[1];
     const tab = m[2] ?? "post";
     if (tab === "profile") {
-      // 사용자가 보여 준 화면과 비슷한 모양: 커버(배경 이미지)·프로필 사진·이름·소개·하트 버튼·스토리 목록(스크롤하면 더 불러옴)
-      const story = (i) => {
-        const d = ["2026년 2월 23일 오전 12:27", "2026년 1월 30일 오후 8:20", "2026년 1월 30일 오후 8:19", "2026년 1월 30일 오후 8:18"][i];
-        const t = ["SPIN-OFF! 코인으로 비리 건 해결 후 복귀", "Coin", "Notice", "Profile"][i];
-        const n = [[0, 0], [0, 18], [0, 2], [0, 0]][i];
-        return `<li class="storyItem"><span class="storyDate">${d}</span><p class="storyText">${t}</p>${i === 3 ? `<a class="linkPreview" href="/band/${BAND}/post/37">프로필 소수합격요소</a>` : ""}<div class="storyCount"><span class="emotion">${n[0]}</span><span class="comment">${n[1]}</span></div></li>`;
-      };
-      const css = `.profileCover{height:140px;border-radius:16px;background-image:url("http://127.0.0.1:4589/img/band_cover.png");background-size:cover}
-        .profileName{font-size:24px;font-weight:700;text-align:center}.profileDesc{font-size:13px;text-align:center;color:#777}
-        .storyList{list-style:none;padding:0}.storyItem{height:260px;border-left:2px solid #ddd;padding-left:16px}.storyDate{color:#999;font-size:12px}`;
-      const script = `window.__liked=0;document.querySelector('.btnLike').addEventListener('click',()=>{window.__liked++});
-        let more=true;window.addEventListener('scroll',()=>{if(more&&innerHeight+scrollY>=document.body.scrollHeight-50){more=false;setTimeout(()=>{document.querySelector('.storyList').insertAdjacentHTML('beforeend',document.getElementById('more').innerHTML)},300)}});`;
+      // 실제 저장 표본과 같은 구조(익명 합성): [DProfileView] 카드 · 스토리 목록(스크롤하면 더 불러옴) · 스토리를 누르면 상세 레이어.
+      // 함정: 하트(_likeEmotionRegion)·표정짓기·메뉴(차단·신고)·댓글 입력을 누르면 기록된다(수집기는 누르면 안 됨)
+      const name = key === "MKDAON" ? "다온" : "나래";
+      const D = ["2026년 2월 23일 오전 12:27", "2026년 1월 30일 오후 8:20", "2026년 1월 30일 오후 8:19", "2026년 1월 30일 오후 8:18"];
+      const T = ["SPIN-OFF! 코인으로 비리 건 해결 후 복귀", "Coin", "Notice", "Profile"];
+      const FULL = ["SPIN-OFF! 코인으로 비리 건 해결 후 복귀\n다음 이야기는 3월에.", "Coin", "Notice\n공지 전문 둘째 줄", "Profile"];
+      const C = [0, 18, 2, 0];
+      const R = [1, 4, 0, 0];
+      const story = (i) => `<li data-viewname="DProfileStoryListItemView" class="storyItem"><div class="storyContent _storyDetail"><time class="time">${D[i]}</time>
+        <div data-viewname="DProfileStoryTextView"><div class="txtBody -listType">${T[i]}</div></div>${i === 0 ? `<div class="_snippetRegion"><img src="http://127.0.0.1:4589/img/post_photo_2.png" width="80"></div>` : ""}
+        <a href="/band/${BAND}/member/${key}" class="storyDetailLink _storyDetail" data-i="${i}"><span class="gSrOnly">스토리 상세</span></a>
+        <div data-viewname="DProfileStoryMoreOptionsView" class="moreOptionBox"><button type="button" class="moreButton _btnPostMore">…</button><div class="menuModalLayer _lyMenu" style="display:none"><a href="#" class="_btnMuteMember trap">이 멤버의 글 차단하기</a></div></div>
+        <div data-viewname="DProfileStoryListItemReactionCountView" class="reactionButton"><div class="reactionItem"><button type="button" class="uEmotionView -story trap"><span class="count ">${R[i]}</span></button></div><div class="reactionItem"><button type="button" class="comment _commentCountBtn"><span class="_commentCountSpan">${C[i]}</span></button></div></div></div></li>`;
+      const comment = (i, j) => `<div data-viewname="DCommentLayoutView" class="cComment"><div data-viewname="DCommentView"><div class="itemWrap"><div class="writeInfo"><img src="http://127.0.0.1:4589/img/avatar_narae.png" alt="나래" width="20"><button type="button" class="nameWrap"><strong class="name">나래</strong></button></div><div class="commentBody"><p class="txt _commentContent">스토리${i + 1} 댓글 ${j + 1}</p><div class="func"><time class="time" title="2026년 2월 1일 오후 1:${String(j).padStart(2, "0")}">2월 1일</time><button type="button" class="reply _replyBtn trap">답글쓰기</button></div></div></div></div></div>`;
+      const css = `.cardBox{position:relative}.backImage{display:block;width:100%;height:140px;border-radius:16px;border:0;background-image:url("http://127.0.0.1:4589/img/band_cover.png");background-size:cover}
+        .userName{font-size:24px;font-weight:700}.storyList{list-style:none;padding:0}.storyItem{min-height:240px;border-left:2px solid #ddd;padding-left:16px}
+        .lyWrap{position:fixed;inset:0;background:#0008;overflow:auto}.postViewer{background:#fff;max-width:600px;margin:40px auto;padding:16px}`;
+      const script = `window.__traps=0;document.addEventListener('click',e=>{if(e.target.closest('.trap,._likeEmotionRegion,._emoteMainBtn,._sendMessageButton,textarea'))window.__traps++},true);
+        const FULL=${JSON.stringify(FULL)},D=${JSON.stringify(D)},C=${JSON.stringify(C)},R=${JSON.stringify(R)};
+        const comment=${comment.toString()};
+        let more=true;window.addEventListener('scroll',()=>{if(more&&innerHeight+scrollY>=document.body.scrollHeight-50){more=false;setTimeout(()=>{document.querySelector('.storyList').insertAdjacentHTML('beforeend',document.getElementById('more').innerHTML)},300)}});
+        document.addEventListener('click',e=>{const a=e.target.closest('a._storyDetail');if(!a)return;e.preventDefault();const i=+a.dataset.i;setTimeout(()=>{
+          const shown=C[i]>10?10:C[i];let cs='';for(let j=C[i]-shown;j<C[i];j++)cs+=comment(i,j);
+          document.body.insertAdjacentHTML('beforeend','<section data-viewname="DProfileStoryDetailLayerView" class="lyWrap layer_wrap" role="document"><div class="lyPostViewer"><div class="postViewer"><div data-viewname="DProfileStoryDetailView" class="cPostCard"><div class="postWriterInfoWrap"><span class="profileStoryDetailWriterBox"><em>${name}</em><span>의 스토리</span></span><div class="postListInfoWrap"><time class="time">'+D[i]+'</time></div></div><div class="postMain"><div data-viewname="DProfileStoryDetailCollectionView"><div class="postText"><div class="txtBody">'+FULL[i].replace(/\\n/g,'<br>')+'</div></div></div></div><div data-viewname="DBandProfileStoryReactionMainView"><div class="postCount"><button class="uEmotionView _emotionCountRegion trap"><span class="count">'+R[i]+'</span></button><button type="button" class="comment">댓글 <span class="count _commentCountSpan">'+C[i]+'</span></button></div><div class="addCol _emoteMainBtn"><a href="#" class="addStatus">표정짓기</a></div><div data-viewname="DBandProfileStoryCommentListView" class="commentList"><div data-viewname="DProfileCommentCollectionView" class="sCommentList">'+(C[i]>shown?'<button type="button" class="prevComment _prevCommentBtn">이전 댓글 '+(C[i]-shown)+'개 보기</button>':'')+cs+'</div></div><div class="cCommentWriteNew _commentInputRegion"><textarea class="commentWrite"></textarea><button type="submit" class="_sendMessageButton">보내기</button></div></div></div></div></div><button type="button" class="btnCloseLyPost _btnClose">닫기</button></section>');
+          const lay=document.querySelector('[data-viewname=DProfileStoryDetailLayerView]:last-of-type');
+          lay.querySelector('._btnClose').addEventListener('click',()=>setTimeout(()=>lay.remove(),150));
+          const pb=lay.querySelector('._prevCommentBtn');if(pb)pb.addEventListener('click',()=>setTimeout(()=>{let add='';for(let j=0;j<C[i]-shown;j++)add+=comment(i,j);pb.insertAdjacentHTML('afterend',add);pb.remove()},200));
+        },200)});`;
       return send(
         200,
         page(
-          `<style>${css}</style><main id="content"><div class="profileCover"><button type="button" class="btnLike" aria-label="좋아요">♡</button></div>
-          <img class="profileImage" src="http://127.0.0.1:4589/img/avatar_garam.png" width="120" height="120" alt="프로필 사진">
-          <strong class="profileName">${key === "MKDAON" ? "다온" : "나래"}</strong><p class="profileDesc">B 27 XX 168 배우</p>
-          <h3>스토리</h3><ul class="storyList">${story(0)}${story(1)}</ul><template id="more">${story(2)}${story(3)}</template></main>`,
+          `<style>${css}</style><div data-viewname="DProfileMainLayoutView"><div data-viewname="DProfileView" class="_dProfileView"><article class="profileStaticPageSection">
+          <div class="cardBox"><button type="button" class="backImage _imgAnchor"></button><p class="joinInfo">2020년 3월 1일</p>
+            <div class="reactionBox"><button type="button" class="like _likeEmotionRegion"><div class="uLike"><span class="count _countBtn">7</span></div></button><a href="/band/${BAND}/member/${key}" class="comment _commentBtn"><span class="count _commentCountSpan">2</span></a></div></div>
+          <button type="button" class="profileBox _imgAnchor"><span class="profileInner"><img class="profileImage" src="http://127.0.0.1:4589/img/avatar_garam.png" width="120" height="120" alt="프로필 사진"></span></button>
+          <div class="profileInfoWrap"><div class="profileInfoBox"><strong class="userName">${name}</strong><span class="userNickname _userDesc">B 27 XX 168 배우</span></div></div></article>
+          <section><h3>스토리</h3><ol data-viewname="DProfileStoryListView" class="storyList">${story(0)}${story(1)}</ol><template id="more">${story(2)}${story(3)}</template></section></div></div>`,
           script,
         ),
       );

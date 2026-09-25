@@ -61,14 +61,16 @@ test("프로필만 있는 .afterlog: 프로필이 화면 가운데에 보이고,
   let chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
   await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/profile-only.afterlog"));
-  await expect(page.getByRole("heading", { name: /인물 프로필 보관 1명/ })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: /보관한 인물 프로필 1명/ })).toBeVisible({ timeout: 15_000 });
   await expect(page.frameLocator(".profile-main-frame").locator("h1")).toHaveText("가상인물");
 
   // 같은 프로젝트에 수집 파일 합치기(선택지 → 합치기)
   chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "파일 열기", exact: true }).click();
   await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
-  await page.getByRole("button", { name: /에 합치기/ }).click();
+  // 합치기 전에 분석 결과(새 글 수 등)를 보여 주고 한 번에 합친다
+  await expect(page.getByRole("dialog", { name: ".afterlog 합치기" })).toContainText("새 글 21개");
+  await page.getByRole("button", { name: "합치기", exact: true }).click();
   await expect(page.locator(".band-card")).toHaveCount(21, { timeout: 15_000 });
   await expect(page.locator(".profile-snapshots")).toContainText("가상인물");
 
@@ -77,7 +79,12 @@ test("프로필만 있는 .afterlog: 프로필이 화면 가운데에 보이고,
   chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "지금 프로젝트에 합치기" }).click();
   await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
-  await expect(page.getByText(/새 글 0개/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("dialog", { name: ".afterlog 합치기" })).toContainText("완전 중복 21개 건너뜀");
+  await page.getByRole("button", { name: "합치기", exact: true }).click();
+  await expect(page.locator(".band-card")).toHaveCount(21);
+  // 이번 합치기 되돌리기(아무것도 안 바뀐 합치기라 그대로)
+  await page.getByRole("button", { name: "이번 합치기 되돌리기" }).click();
+  await expect(page.getByText("이번 합치기를 되돌렸습니다.")).toBeVisible();
   await expect(page.locator(".band-card")).toHaveCount(21);
   expect(errors).toEqual([]);
 });

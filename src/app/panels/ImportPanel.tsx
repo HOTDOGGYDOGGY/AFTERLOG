@@ -1,6 +1,7 @@
 import { SITE } from "../shell/Shell";
 import { useState } from "react";
 import { analyzeFiles, commitImport, type PendingImport } from "../../importers/importFiles";
+import { profileSummary } from "../../importers/band/profile";
 import { blocksToPlainText } from "../../importers/band/html";
 import { createProject } from "../../storage/repo";
 import { describeStorageError } from "../../storage/db";
@@ -59,7 +60,7 @@ export function ImportPanel({
   projectId: string | null;
   onImported(projectId: string, docs: DocumentData[]): void;
   /** .afterlog(수집 확장·프로젝트 저장 파일)를 넣었을 때: 새 프로젝트로 열거나(new) 지금 프로젝트에 합친다(merge) */
-  onOpenProjectFiles?(files: File[], mode: "new" | "merge"): Promise<void>;
+  onOpenProjectFiles?(files: File[], mode: "new" | "merge" | "ask"): Promise<void>;
   /** 합칠 수 있는 지금 프로젝트 이름(없으면 합치기 선택지를 보이지 않음) */
   mergeTargetTitle?: string | null;
   compact?: boolean;
@@ -69,44 +70,11 @@ export function ImportPanel({
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
+  const [selectedProfiles, setSelectedProfiles] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
   const [paste, setPaste] = useState("");
-  const [choice, setChoice] = useState<File[] | null>(null);
-  const openAs = async (mode: "new" | "merge") => {
-    const files = choice;
-    setChoice(null);
-    if (!files || !onOpenProjectFiles) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onOpenProjectFiles(files, mode);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const choiceBox = choice ? (
-    <div className="notice merge-choice" role="dialog" aria-label=".afterlog 여는 방법">
-      <p>
-        <b>.afterlog {choice.length > 1 ? `${choice.length}개(파트)` : "파일"}</b>을 어떻게 열까요?
-      </p>
-      <div className="modal-actions">
-        <button type="button" className="ui-btn ui-btn-primary" onClick={() => void openAs("merge")}>
-          '{mergeTargetTitle}'에 합치기 (같은 글·프로필은 건너뜀)
-        </button>
-        <button type="button" className="ui-btn" onClick={() => void openAs("new")}>
-          새 프로젝트로 열기
-        </button>
-        <button type="button" className="ui-btn ui-btn-quiet" onClick={() => setChoice(null)}>
-          취소
-        </button>
-      </div>
-    </div>
-  ) : null;
-
   const analyze = async (files: File[], pasted?: string) => {
     if (!files.length && !pasted?.trim()) return;
     setError(null);
@@ -117,9 +85,8 @@ export function ImportPanel({
       const projectFiles = files.filter((_, i) => flags[i]);
       if (projectFiles.length) {
         if (!onOpenProjectFiles) throw new Error(".afterlog 파일은 상단 프로젝트 이름 → '파일 열기 (.afterlog)'로 여세요.");
-        // 지금 프로젝트가 있으면 합칠지 새로 열지 고르게 한다
-        if (mergeTargetTitle) setChoice(projectFiles);
-        else await onOpenProjectFiles(projectFiles, "new");
+        // 지금 프로젝트가 있으면 합칠 내용을 분석해 보여 주고 고르게 한다(합치기 / 새 프로젝트로 열기)
+        await onOpenProjectFiles(projectFiles, mergeTargetTitle ? "ask" : "new");
         return;
       }
       const p = await analyzeFiles(files, projectId, pasted);
@@ -129,6 +96,8 @@ export function ImportPanel({
       if (posts.length === 1) setSelected(posts);
       else if (posts.length > 1) setSelected([]);
       else setSelected(p.parse.documents.length === 1 ? [0] : []);
+      // 프로필은 모두 기본 선택
+      setSelectedProfiles(p.profiles.map((_, i) => i));
       setPaste("");
     } catch (e) {
       setError((e as Error).message);
@@ -144,10 +113,10 @@ export function ImportPanel({
     try {
       let pid = projectId;
       if (!pid) {
-        const title = pending.parse.bandName ?? pending.parse.documents[selected[0]]?.title ?? "새 프로젝트";
+        const title = pending.parse.bandName ?? pending.parse.documents[selected[0]]?.title ?? (pending.profiles[selectedProfiles[0]] ? `${pending.profiles[selectedProfiles[0]].record.name ?? "인물"} 프로필` : "새 프로젝트");
         pid = (await createProject(title)).id;
       }
-      const docs = await commitImport(pid, pending, selected);
+      const docs = await commitImport(pid, pending, selected, selectedProfiles);
       setPending(null);
       onImported(pid, docs);
     } catch (e) {
@@ -228,6 +197,31 @@ export function ImportPanel({
             </label>
           );
         })}
+        {pending.profiles.map((pr, i) => {
+          const r = pr.record;
+          return (
+            <label key={`p${i}`} className={`import-doc${selectedProfiles.includes(i) ? " is-selected" : ""}`}>
+              <input
+                type="checkbox"
+                checked={selectedProfiles.includes(i)}
+                onChange={(e) => setSelectedProfiles((s) => (e.target.checked ? [...s, i].sort() : s.filter((x) => x !== i)))}
+              />
+              <div>
+                <div className="import-doc-title">
+                  <span className="tag">{r.surface === "profilePopup" ? "프로필 팝업" : "인물 프로필"}</span> {r.name ?? "이름 확인 못 함"}
+                </div>
+                <div className="small muted">
+                  {profileSummary(r)} · {pr.fileName}
+                </div>
+                {r.notes.map((n) => (
+                  <div key={n} className="small muted">
+                    {n}
+                  </div>
+                ))}
+              </div>
+            </label>
+          );
+        })}
         <p className="small muted">
           이미지 파일 {parse.imageRefs.length - pending.missingImages.length}/{parse.imageRefs.length}개 확보
           {pending.linkOnlyImages.length ? ` · ${pending.linkOnlyImages.length}개는 링크만 있습니다(자동으로 내려받지 않음)` : ""}
@@ -235,8 +229,8 @@ export function ImportPanel({
         </p>
         {pending.lines ? <LineReview lines={pending.lines} /> : null}
         {error ? <p className="notice error">{error}</p> : null}
-        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || !selected.length} onClick={doImport}>
-          {busy ? "가져오는 중…" : `선택한 ${selected.length}개 가져오기`}
+        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || (!selected.length && !selectedProfiles.length)} onClick={doImport}>
+          {busy ? "가져오는 중…" : `선택한 ${selected.length + selectedProfiles.length}개 가져오기`}
         </button>
         <p className="small muted">원본 HTML은 프로젝트 안에 그대로 보관됩니다.</p>
       </div>
@@ -281,7 +275,6 @@ export function ImportPanel({
             </button>
           </div>
         ) : null}
-        {choiceBox}
         {error ? <p className="notice error">{error}</p> : null}
         <details className="collector-box">
           <summary>글이 많다면: 수집 확장프로그램(크롬·PC)</summary>
@@ -361,7 +354,6 @@ export function ImportPanel({
           분석
         </button>
       </div>
-      {choiceBox}
       {error ? <p className="notice error">{error}</p> : null}
       <details className="small muted support">
         <summary>지원 범위</summary>

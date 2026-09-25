@@ -366,7 +366,7 @@ test("검색 결과 주소 여러 개: 넣으면 검색어를 읽어 아래 칸�
   await mgr.close();
 });
 
-test("인물 프로필 보관: '이 프로필 저장' → 끝까지 스크롤해 스토리 4개, 사진·스타일째 보관, 아무것도 누르지 않음", async () => {
+test("인물 프로필 저장: 스토리 상세를 열어 전문·댓글(이전 댓글 펼치기)까지 구조로 저장, 쓰기 버튼은 누르지 않음", async () => {
   const band = await ctx.newPage();
   await band.goto(`${BAND}/member/MKDAON/profile`);
   const bar = band.locator("#afterlog-collector-bar");
@@ -374,45 +374,88 @@ test("인물 프로필 보관: '이 프로필 저장' → 끝까지 스크롤해
   await bar.getByRole("button", { name: "이 프로필 저장" }).click();
   const mgr = await mgrPromise;
   await mgr.waitForLoadState();
-  await waitStatus(mgr, /끝남/, 120_000);
+  await waitStatus(mgr, /끝남/, 180_000);
   const tile = mgr.locator(".stat.wide", { hasText: "프로필" });
   await expect(tile.locator("b")).toHaveText("스토리 4");
   await expect(tile).toContainText("다온");
-  await expect(tile).toContainText("사진 2장");
   await mgr.screenshot({ path: `${OUT}/10-profile-finished.png`, fullPage: true });
-  // 보관본: 스타일·이미지(데이터로 포함)·스크롤로 더 불러온 스토리까지
-  const viewP = ctx.waitForEvent("page");
+  // 구조화 보관본: 상세 전문, 스토리별 표정·댓글 수, 펼친 댓글 18개, 스크립트 없음
+  let viewP = ctx.waitForEvent("page");
   await tile.getByRole("button", { name: "보관본 보기" }).click();
-  const view = await viewP;
+  let view = await viewP;
   await view.waitForLoadState();
-  await expect(view.locator(".profileName")).toHaveText("다온");
-  await expect(view.locator(".storyItem")).toHaveCount(4);
-  await expect(view.locator("body")).toContainText("SPIN-OFF!");
-  expect(await view.locator(".profileImage").getAttribute("src")).toMatch(/^data:image\//);
-  expect(await view.locator(".profileCover").evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("data:image/");
-  expect(await view.locator(".profileName").evaluate((el) => getComputedStyle(el).fontSize)).toBe("24px");
+  await expect(view.locator("h1")).toHaveText("다온");
+  await expect(view.locator(".story")).toHaveCount(4);
+  await expect(view.locator("#story-1")).toContainText("다음 이야기는 3월에.");
+  await expect(view.locator("#story-2 .comments > li")).toHaveCount(18);
+  await expect(view.locator("#story-2 .counts")).toContainText("이 스토리의 표정 4 · 댓글 18");
+  await expect(view.locator("#profile")).toContainText("프로필 표정");
+  await expect(view.locator("#photos")).toContainText("사진 이력 확인 못 함");
+  expect(await view.locator(".face").getAttribute("src")).toMatch(/^data:image\//);
   expect(await view.evaluate(() => document.querySelectorAll("script").length)).toBe(0);
-  await view.screenshot({ path: `${OUT}/11-profile-snapshot.png`, fullPage: true });
+  await view.screenshot({ path: `${OUT}/11-profile-structured.png`, fullPage: true });
   await view.close();
-  // 하트(좋아요)는 누르지 않았다
-  for (const p of ctx.pages().filter((x) => x.url().includes("/member/MKDAON/profile"))) expect(await p.evaluate(() => (window as unknown as { __liked: number }).__liked)).toBe(0);
-  // .afterlog → 웹 앱의 '인물 프로필 보관'
+  // 보관 당시 화면(스냅숏)
+  viewP = ctx.waitForEvent("page");
+  await tile.getByRole("button", { name: "보관 당시 화면" }).click();
+  view = await viewP;
+  await view.waitForLoadState();
+  await expect(view.locator(".userName")).toHaveText("다온");
+  await expect(view.locator(".storyItem")).toHaveCount(4);
+  expect(await view.locator(".backImage").evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("data:image/");
+  await view.close();
+  // 하트·표정·답글쓰기·차단 메뉴·댓글 입력은 누르지 않았다
+  for (const p of ctx.pages().filter((x) => x.url().includes("/member/MKDAON/profile"))) expect(await p.evaluate(() => (window as unknown as { __traps: number }).__traps)).toBe(0);
+  // .afterlog → 웹 앱: 프로필이 가운데에 구조로 보인다
   const dl = mgr.waitForEvent("download");
   await mgr.getByRole("button", { name: /\.afterlog로 저장/ }).click();
   const file = resolve(OUT, "profile.afterlog");
   await (await dl).saveAs(file);
   const web = await ctx.newPage();
   await web.goto("http://localhost:5179/");
-  // 앞 검사에서 연 프로젝트가 있을 수 있어 프로젝트 메뉴에서 연다(첫 화면 '파일 열기'는 로컬 실행판 검사에서 확인)
   await web.locator(".project-switch").click();
   const chooser = web.waitForEvent("filechooser");
   await web.getByRole("button", { name: /파일 열기 \(\.afterlog\)/ }).click();
   await (await chooser).setFiles(file);
-  // 글 없이 프로필만 있어도 빈 안내 대신 프로필이 가운데에 보인다
-  await expect(web.getByRole("heading", { name: "인물 프로필 보관 1명" })).toBeVisible();
-  await expect(web.locator(".profile-main-bar")).toContainText("다온");
-  await expect(web.frameLocator(".profile-main-frame").locator("body")).toContainText("다온");
+  const pv = web.locator(".profile-view");
+  await expect(pv.locator("h2.pv-name")).toHaveText("다온");
+  await pv.getByRole("tab", { name: /스토리/ }).click();
+  await expect(pv.locator(".pv-story")).toHaveCount(4);
+  await expect(pv.locator(".pv-story").nth(1).locator(".pv-comment")).toHaveCount(18);
+  await web.screenshot({ path: `${OUT}/12-profile-in-app.png`, fullPage: true });
   await web.close();
+  await mgr.close();
+  await band.close();
+});
+
+test("주소가 그대로인 프로필 팝업: 열린 인물만 읽고(배경 목록·다음 프로필 누르지 않음) 인물 연결 미확인으로 저장", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/member`);
+  const bar = band.locator("#afterlog-collector-bar");
+  await expect(bar.getByRole("button", { name: "이 프로필 저장" })).toHaveCount(0);
+  await band.getByRole("button", { name: "다온" }).click();
+  // 주소는 그대로인데 막대가 팝업을 알아본다
+  await expect(bar.getByRole("button", { name: "이 프로필 저장" })).toBeVisible({ timeout: 5000 });
+  expect(band.url()).toBe(`${BAND}/member`);
+  const mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 프로필 저장" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 60_000);
+  const tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await expect(tile).toContainText("다온");
+  await expect(tile).toContainText("스토리");
+  const viewP = ctx.waitForEvent("page");
+  await tile.getByRole("button", { name: "보관본 보기" }).click();
+  const view = await viewP;
+  await view.waitForLoadState();
+  await expect(view.locator("h1")).toHaveText("다온");
+  await expect(view.locator("body")).toContainText("원본 인물 연결 미확인");
+  await expect(view.locator("body")).toContainText("팝업 소개 2");
+  await expect(view.locator("body")).not.toContainText("나래");
+  await expect(view.locator("#profile")).toContainText("프로필 표정확인 못 함");
+  await view.close();
+  expect(await band.evaluate(() => (window as unknown as { __traps: number }).__traps)).toBe(0);
   await mgr.close();
   await band.close();
 });

@@ -3,6 +3,7 @@
 import { BAND_ORIGINS, LIMITS, MIN_DELAY_MS } from "./config";
 import { BrowserError, fetchImage, type CollectorBrowser, type TabRole } from "./browser";
 import { captureProfileInPage, type ProfileExtraction } from "./page/profile";
+import { captureProfilePopupInPage, type ProfilePopupExtraction } from "./page/profilePopup";
 import { openCommentPostInPage, readMemberCommentsInPage, type MemberCommentsRound, type OpenCommentPostResult } from "./page/memberComments";
 import { extractPostInPage, type PostExtraction } from "./page/extractPost";
 import { discoverRoundInPage, type DiscoverRound } from "./page/discoverLinks";
@@ -153,10 +154,14 @@ export class ChromeBrowser implements CollectorBrowser {
   async captureProfile(url: string) {
     const { tabId, ms } = await this.navigate(url, "body");
     const t0 = Date.now();
-    const ex = await this.exec<[{ waitMs: number; maxRounds: number; maxCssBytes: number; readyMs: number }], ProfileExtraction>(tabId, captureProfileInPage, [
-      { waitMs: Math.max(1000, MIN_DELAY_MS), maxRounds: 200, maxCssBytes: 3 * 1024 * 1024, readyMs: LIMITS.pageTimeoutMs },
+    const ex = await this.exec<Parameters<typeof captureProfileInPage>, ProfileExtraction>(tabId, captureProfileInPage, [
+      { waitMs: Math.max(1000, MIN_DELAY_MS), maxRounds: 200, maxCssBytes: 3 * 1024 * 1024, readyMs: LIMITS.pageTimeoutMs, openStories: true, storyMs: 60_000, storiesTotalMs: LIMITS.expandMs },
     ]);
     return { ex, loadMs: ms + (Date.now() - t0) };
+  }
+
+  async captureProfilePopup(tabId: number) {
+    return this.exec<[], ProfilePopupExtraction>(tabId, captureProfilePopupInPage, []);
   }
 
   async sampleStructure(target: { url?: string; tabId?: number }) {

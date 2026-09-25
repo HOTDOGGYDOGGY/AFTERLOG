@@ -15,7 +15,8 @@ import { BandHome } from "./BandHome";
 import { DocSession, type BandViewMode } from "./DocSession";
 import { PersonLayer } from "./PersonLayer";
 import { ImportPanel } from "../panels/ImportPanel";
-import { ProfileSnapshots, useProfileSnapshots } from "./ProfileSnapshots";
+import { ProfileSnapshots } from "./ProfileSnapshots";
+import { ProfilePanel, useProfiles, type ProfileEntry } from "./ProfileView";
 import { CaptureReports } from "../panels/CaptureReports";
 import { ExportDialog } from "../panels/ExportDialog";
 import type { AppThemeResolved } from "../../renderers/band/style";
@@ -33,6 +34,7 @@ export function BandModule({
   onOpenProjectFiles,
   appTheme,
   registerFlush,
+  dataVersion,
 }: {
   active: boolean;
   projectId: string | null;
@@ -44,14 +46,23 @@ export function BandModule({
   reload(): Promise<void>;
   onImported(projectId: string, docs: DocumentData[]): void;
   /** .afterlog 파일을 가져오기 칸에 넣었을 때: 새 프로젝트로 열기 또는 지금 프로젝트에 합치기 */
-  onOpenProjectFiles?(files: File[], mode: "new" | "merge"): Promise<void>;
+  onOpenProjectFiles?(files: File[], mode: "new" | "merge" | "ask"): Promise<void>;
   appTheme: AppThemeResolved;
   registerFlush(fn: () => Promise<void>): () => void;
+  /** 가져오기·합치기로 자료가 바뀔 때마다 늘어나는 번호(프로필·이미지 다시 읽기) */
+  dataVersion?: number;
 }) {
   const [mode, setMode] = useState<BandViewMode>("original");
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const assets = useAssets(projectId);
+  const assetsReload = assets.reload;
+  useEffect(() => {
+    if (dataVersion) void assetsReload();
+  }, [dataVersion, assetsReload]);
+  const [profileOpen, setProfileOpen] = useState<string | null>(null);
+  const assetList = assets.assets;
+  const assetIdBySha = useCallback((sha: string) => assetList.find((a) => a.sha256 === sha)?.id, [assetList]);
   const people = useMemo(() => buildPeople(docs), [docs]);
   const sessionFlush = useRef<(() => Promise<void>) | null>(null);
 
@@ -174,7 +185,7 @@ export function BandModule({
     </div>
   ) : null;
 
-  const profileCount = useProfileSnapshots(projectId, captureReports.length)?.length ?? 0;
+  const profiles = useProfiles(projectId, `${captureReports.length}:${dataVersion ?? 0}`) ?? [];
 
   // ---------- 자료가 없을 때 ----------
   if (!projectId || docs.length === 0) {
@@ -183,8 +194,9 @@ export function BandModule({
         {importButton}
         <BandEmpty
           projectId={projectId}
-          profiles={profileCount}
-          refreshKey={captureReports.length}
+          profiles={profiles}
+          assetUrl={assets.url}
+          assetIdBySha={assetIdBySha}
           onImported={onImported}
           onOpenProjectFiles={onOpenProjectFiles}
           mergeTargetTitle={projectId ? projectTitle : null}
@@ -229,7 +241,7 @@ export function BandModule({
           appTheme={appTheme}
           dimmed={layerOpen}
           captureCount={captureReports.length}
-          sideExtra={<ProfileSnapshots projectId={projectId} refreshKey={captureReports.length} />}
+          sideExtra={<ProfileSnapshots profiles={profiles} onOpen={setProfileOpen} />}
           onOpenDoc={(id) => navigate({ screen: "post", docId: id })}
           onOpenPerson={(key) => navigate({ screen: "person", person: key })}
           onOpenChat={() => navigate({ screen: "chat" })}
@@ -303,6 +315,31 @@ export function BandModule({
       ) : null}
 
       {exportOpen ? <ExportDialog doc={null} docs={docs} getBlob={assets.getBlob} appTheme={appTheme} projectTitle={projectTitle} onClose={() => setExportOpen(false)} /> : null}
+      {profileOpen ? (
+        <div className="drawer-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && setProfileOpen(null)}>
+          <aside className="drawer drawer-right profile-drawer" role="dialog" aria-modal="true" aria-label="보관한 인물 프로필">
+            <div className="panel-head">
+              <strong>보관한 인물 프로필</strong>
+              <button type="button" className="ui-icon-btn" aria-label="닫기" onClick={() => setProfileOpen(null)}>
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+            <div className="panel-body">
+              <ProfilePanel
+                profiles={profiles}
+                assetUrl={assets.url}
+                assetIdBySha={assetIdBySha}
+                docs={docs}
+                initialId={profileOpen}
+                onOpenDoc={(id) => {
+                  setProfileOpen(null);
+                  navigate({ screen: "post", docId: id });
+                }}
+              />
+            </div>
+          </aside>
+        </div>
+      ) : null}
       {importSheet}
     </div>
   );
@@ -327,22 +364,27 @@ function EscToClose({ onClose }: { onClose(): void }) {
 function BandEmpty({
   projectId,
   profiles,
-  refreshKey,
+  assetUrl,
+  assetIdBySha,
   onImported,
   onOpenProjectFiles,
   mergeTargetTitle,
 }: {
   projectId: string | null;
-  profiles: number;
-  refreshKey?: unknown;
+  profiles: ProfileEntry[];
+  assetUrl(id: string): string | undefined;
+  assetIdBySha(sha: string): string | undefined;
   onImported(pid: string, docs: DocumentData[]): void;
-  onOpenProjectFiles?(files: File[], mode: "new" | "merge"): Promise<void>;
+  onOpenProjectFiles?(files: File[], mode: "new" | "merge" | "ask"): Promise<void>;
   mergeTargetTitle?: string | null;
 }) {
-  if (projectId && profiles > 0)
+  if (projectId && profiles.length > 0)
     return (
       <div className="band-empty band-empty-col">
-        <ProfileSnapshots projectId={projectId} refreshKey={refreshKey} variant="main" />
+        <div className="profile-main">
+          <h2 className="profile-main-title">보관한 인물 프로필 {profiles.length}명</h2>
+          <ProfilePanel profiles={profiles} assetUrl={assetUrl} assetIdBySha={assetIdBySha} docs={[]} />
+        </div>
         <div className="band-empty-inner is-secondary">
           <h1>이 프로젝트에는 프로필만 있습니다. 글·댓글도 가져올 수 있어요.</h1>
           <ImportPanel projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} mergeTargetTitle={mergeTargetTitle} variant="start" />

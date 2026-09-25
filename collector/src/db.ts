@@ -1,3 +1,4 @@
+import type { BandProfileRecord } from "../../src/importers/band/profile";
 // 수집 확장 DB (확장 origin의 IndexedDB). 작업·과제·수집 원문·첨부·진단을 보관한다.
 // 진단은 백업과 다른 표에 두고 짧게 보관한다(명세 v1.1 20.7).
 import Dexie, { type Table } from "dexie";
@@ -102,7 +103,7 @@ export interface Job {
   id: string;
   createdAt: string;
   label: string;
-  scope: "current-post" | "post-urls" | "list" | "selection";
+  scope: "current-post" | "post-urls" | "list" | "selection" | "profile";
   status: JobStatus;
   pauseReason: string | null;
   options: JobOptions;
@@ -210,6 +211,10 @@ export interface ProfileCapture {
   stories: { date: string; text: string; numbers: number[]; links: string[] }[];
   capturedAt: string;
   collectorVersion: string;
+  /** 구조화 프로필(0.3+). 화면 구조를 알아보지 못했으면 없음(보관 화면만) */
+  record?: BandProfileRecord | null;
+  /** 어디서 읽었나: 프로필 페이지 · 사용자 탭의 팝업 */
+  surface?: "profilePage" | "profilePopup";
 }
 
 export type AssetStatus = "pending" | "stored" | "failed" | "unavailable" | "notRequested" | "unsupported";

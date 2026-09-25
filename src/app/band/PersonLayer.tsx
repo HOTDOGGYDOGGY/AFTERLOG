@@ -1,5 +1,5 @@
 // 보관된 인물 프로필(레이어). 가져온 문서에서 다시 모은 글·댓글이며, 밴드의 실제 프로필 전체를 수집한 것이 아니다.
-// 스토리·프로필 반응은 수집 미지원으로 분명히 표시한다(가짜 커버·가짜 수치 없음).
+// 스토리·프로필 반응은 여기서 만들지 않고 '보관한 인물 프로필'(구조 자료)로 안내한다(가짜 커버·가짜 수치 없음).
 import { useLayoutEffect, useRef } from "react";
 import type { DocumentData } from "../../domain/types";
 import { blocksToPlainText } from "../../importers/band/html";
@@ -73,13 +73,13 @@ export function PersonLayer({
       <div className="band-profile-body">
         {tab === "posts" ? <Items items={person.posts} onJump={onJump} empty="보관된 글이 없습니다." /> : null}
         {tab === "comments" ? <Items items={person.comments} onJump={onJump} empty="보관된 댓글이 없습니다." /> : null}
-        {tab === "stories" ? <p className="band-profile-empty">프로필 스토리와 스토리 댓글은 아직 수집하지 않습니다(실제 화면 샘플 확인 전).</p> : null}
+        {tab === "stories" ? <p className="band-profile-empty">이 화면은 가져온 글·댓글에서 모은 목록입니다. 프로필 스토리·스토리 댓글은 수집 확장의 '이 프로필 저장'이나 저장한 프로필 페이지로 가져온 뒤, 옆칸 '보관한 인물 프로필'에서 봅니다.</p> : null}
         {tab === "reactions" ? (
           reacted.length ? (
             <Items items={reacted} onJump={onJump} empty="" showReactions />
           ) : (
             <p className="band-profile-empty">
-              이 인물의 글·댓글에서 확인된 표정 수가 없습니다. 화면에 수가 보이지 않던 곳은 0이 아니라 '미확보'입니다. 프로필 자체에 달린 반응·하트는 아직 수집하지 않습니다.
+              이 인물의 글·댓글에서 확인된 표정 수가 없습니다. 화면에 수가 보이지 않던 곳은 0이 아니라 '미확보'입니다. 프로필 자체에 달린 표정·하트는 '보관한 인물 프로필'에서 봅니다.
             </p>
           )
         ) : null}

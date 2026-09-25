@@ -1,8 +1,9 @@
 // 인물 프로필 화면(/band/숫자/member/식별자/profile)에서 실행되는 함수. 페이지에 주입되므로 자체 완결형으로 유지한다.
-// 실제 화면 구조 샘플이 없어서 구조를 추측해 해석하지 않고, 보이는 모습을 그대로 보관한다(스냅숏):
-//  - 끝까지 스크롤해 스토리를 모두 불러온 뒤 본문 영역을 복제하고, 페이지 스타일(CSS)과 이미지 주소(배경 이미지 포함)를 함께 모은다.
-//  - 이름·소개·스토리(날짜·글·숫자)는 요약용으로만 추정한다(날짜 표기 '2026년 2월 23일 오전 12:27'을 기준으로 항목을 나눔).
-// 아무것도 누르지 않는다(프로필의 하트·댓글·메뉴 버튼은 반응·쓰기라 절대 누르지 않음). 스크롤만 한다.
+// 두 가지를 함께 만든다:
+//  1) 구조 자료: 프로필 카드·스토리 목록과, 스토리마다 상세 레이어를 열어 읽은 전문·반응 수·댓글(실제 저장 표본의 구조). 해석은 앱과 같은 해석기(src/importers/band/profile.ts)가 한다.
+//  2) 보관 화면(스냅숏): 보이는 모습 그대로의 HTML·CSS·이미지 주소.
+// 누르는 것: 스토리 상세 열기(a.storyDetailLink._storyDetail) · 상세의 '이전 댓글/답글 더보기'류 · 상세 닫기(._btnClose)만.
+// 하트·표정·댓글쓰기·메뉴(차단·신고)·입력칸은 절대 누르지 않는다.
 
 export interface ProfileStory {
   date: string;
@@ -24,9 +25,23 @@ export interface ProfileExtraction {
   imageUrls: string[];
   stories: ProfileStory[];
   scrollRounds: number;
+  /** 구조 자료(정리된 HTML): 프로필 영역 + 연 스토리 상세들 */
+  structureHtml?: string | null;
+  /** 스토리 상세: 연 수 · 목록 항목 수 · 확인 실패(다른 스토리가 열림 등) · 닫지 못함 */
+  storyDetails?: { opened: number; listed: number; mismatched: number; notClosed: number; commentClicks: number; stoppedEarly: boolean };
 }
 
-export async function captureProfileInPage(opts: { waitMs: number; maxRounds: number; maxCssBytes: number; readyMs: number }): Promise<ProfileExtraction> {
+export async function captureProfileInPage(opts: {
+  waitMs: number;
+  maxRounds: number;
+  maxCssBytes: number;
+  readyMs: number;
+  /** 스토리 상세를 열어 전문·댓글 읽기(기본 켬) */
+  openStories?: boolean;
+  /** 스토리 하나에 쓸 시간 · 전체 스토리 상세 시간 */
+  storyMs?: number;
+  storiesTotalMs?: number;
+}): Promise<ProfileExtraction> {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const txt = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const base = { pageUrl: location.href, name: null, description: null, html: null, css: "", cssTruncated: false, imageUrls: [], stories: [], scrollRounds: 0 };
@@ -52,8 +67,133 @@ export async function captureProfileInPage(opts: { waitMs: number; maxRounds: nu
   }
   window.scrollTo(0, 0);
 
+  // ---- 스토리 상세(읽기 전용 열기 → 댓글 펼치기 → 복제 → 닫기) ----
+  const cleanClone = (el: Element) => {
+    const c = el.cloneNode(true) as Element;
+    const oi = Array.from(el.querySelectorAll("img"));
+    Array.from(c.querySelectorAll("img")).forEach((im, i) => {
+      const o = oi[i] as HTMLImageElement | undefined;
+      const src = o?.currentSrc || o?.src || im.getAttribute("src") || "";
+      if (src) im.setAttribute("src", src);
+      im.removeAttribute("srcset");
+    });
+    // 배경 이미지(커버)는 계산된 값을 style에 적는다
+    const oa = [el, ...Array.from(el.querySelectorAll("*"))];
+    [c, ...Array.from(c.querySelectorAll("*"))].forEach((n, i) => {
+      const o = oa[i];
+      if (!o) return;
+      const bg = getComputedStyle(o).backgroundImage;
+      if (bg && bg !== "none" && bg.includes("url(")) (n as HTMLElement).style.backgroundImage = bg;
+    });
+    c.querySelectorAll("script, noscript, iframe, object, embed, input, textarea, select, form, .cCommentWriteNew, ._commentInputRegion, .menuModalLayer").forEach((x) => x.remove());
+    for (const n of [c, ...Array.from(c.querySelectorAll("*"))])
+      for (const a of Array.from(n.attributes)) if (/^on/i.test(a.name) || a.name === "value" || (/^data-/i.test(a.name) && a.name !== "data-viewname")) n.removeAttribute(a.name);
+    return c.outerHTML;
+  };
+  const visible = (el: Element | null): el is HTMLElement => {
+    if (!el) return false;
+    for (let n: Element | null = el; n; n = n.parentElement) {
+      const st = getComputedStyle(n);
+      if (st.display === "none" || st.visibility === "hidden") return false;
+    }
+    return true;
+  };
+  const openDetail = () => Array.from(document.querySelectorAll("[data-viewname='DProfileStoryDetailView']")).find((d) => visible(d)) ?? null;
+  const TEXT_OK = /^(이전\s*댓글|이전\s*답글|지난\s*댓글|댓글\s*\d*\s*개?\s*더\s*보기|답글\s*\d*\s*개?\s*(더\s*)?보기|이전\s*댓글\s*\d*\s*개?\s*(더\s*)?보기)/;
+  const CLASS_OK = /prevComment|PrevComment|moreComment|MoreComment|commentMore|CommentMore|prevReply|PrevReply|replyMore|ReplyMore|moreReply|MoreReply|previousComment|PreviousComment/;
+  const CLASS_DENY = /mute|Mute|emotion|Emotion|emote|Emote|translat|Translat|setting|Setting|submit|Submit|write|Write|delete|Delete|remove|Remove|report|Report|_replyBtn|share|Share|like|Like|menu|Menu|upload|Upload|edit|Edit|sticker|Sticker|send|Send/;
+  const details: string[] = [];
+  const sd = { opened: 0, listed: 0, mismatched: 0, notClosed: 0, commentClicks: 0, stoppedEarly: false };
+  const items = Array.from(document.querySelectorAll("[data-viewname='DProfileStoryListItemView']"));
+  sd.listed = items.length;
+  if (opts.openStories !== false) {
+    const allUntil = Date.now() + (opts.storiesTotalMs ?? 10 * 60_000);
+    for (const li of items) {
+      if (Date.now() > allUntil) {
+        sd.stoppedEarly = true;
+        break;
+      }
+      const link = li.querySelector("a.storyDetailLink._storyDetail, a._storyDetail") as HTMLElement | null;
+      if (!link) continue;
+      const wantTime = txt(li.querySelector("time"));
+      const path0 = location.pathname;
+      const before = openDetail();
+      link.click();
+      let d: HTMLElement | null = null;
+      for (const t0 = Date.now(); Date.now() - t0 < Math.min(opts.readyMs, 15_000); ) {
+        await sleep(150);
+        const cur = openDetail();
+        if (cur && cur !== before && txt(cur).length > 2) {
+          d = cur;
+          break;
+        }
+      }
+      if (!d) continue;
+      await sleep(Math.min(opts.waitMs, 800));
+      // 다른 스토리가 열렸으면 쓰지 않는다
+      const gotTime = txt(d.querySelector(".postListInfoWrap time, time"));
+      if (wantTime && gotTime && wantTime.replace(/\s+/g, "") !== gotTime.replace(/\s+/g, "")) {
+        sd.mismatched++;
+      } else {
+        // 댓글 펼치기(허용 목록 버튼만). 새 댓글이 없는 상태가 이어지면 멈춘다
+        const until = Date.now() + (opts.storyMs ?? 60_000);
+        const tried = new WeakSet<Element>();
+        let stall = 0;
+        const area = () => d!.querySelector("[data-viewname='DBandProfileStoryCommentListView']") ?? d!;
+        while (Date.now() < until && stall < 4) {
+          const btn = Array.from(area().querySelectorAll('button, a, [role="button"]')).find((el) => {
+            if (tried.has(el) || !visible(el)) return false;
+            if (el.closest('form, textarea, [contenteditable="true"], .cCommentWriteNew, ._commentInputRegion, .mentions-input')) return false;
+            const cls = (el.getAttribute("class") ?? "") + " " + (el.getAttribute("data-uiselector") ?? "");
+            if (CLASS_DENY.test(cls)) return false;
+            const t = txt(el);
+            return TEXT_OK.test(t) || (CLASS_OK.test(cls) && t.length <= 40);
+          }) as HTMLElement | undefined;
+          if (!btn) break;
+          const n0 = d.querySelectorAll(".cComment").length;
+          btn.click();
+          sd.commentClicks++;
+          tried.add(btn);
+          let grew = false;
+          for (const t0 = Date.now(); Date.now() - t0 < 5000; ) {
+            await sleep(150);
+            if (d.querySelectorAll(".cComment").length !== n0) {
+              grew = true;
+              await sleep(300);
+              break;
+            }
+          }
+          stall = grew ? 0 : stall + 1;
+        }
+        details.push(cleanClone(d));
+        sd.opened++;
+      }
+      // 닫기: 상세 레이어의 닫기 버튼 → Esc → (주소가 바뀌었으면) 뒤로
+      const layer = d.closest("[data-viewname='DProfileStoryDetailLayerView']") ?? d.parentElement;
+      const closeBtn = (layer?.querySelector("._btnClose, .btnCloseLyPost") ?? null) as HTMLElement | null;
+      if (closeBtn) closeBtn.click();
+      else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
+      for (let i = 0; i < 20 && openDetail() === d; i++) await sleep(100);
+      if (openDetail() === d && location.pathname !== path0) {
+        history.back();
+        for (let i = 0; i < 20 && openDetail() === d; i++) await sleep(100);
+      }
+      if (openDetail() === d) {
+        sd.notClosed++;
+        sd.stoppedEarly = true;
+        break;
+      }
+      await sleep(Math.min(opts.waitMs, 600));
+    }
+  }
+  const profileEl = document.querySelector("[data-viewname='DProfileView']");
+  const listEl = document.querySelector("[data-viewname='DProfileStoryListView']");
+  const structureHtml = profileEl
+    ? `<div data-afterlog="profile">${cleanClone(profileEl)}${listEl && !profileEl.contains(listEl) ? cleanClone(listEl) : ""}<div data-afterlog="details">${details.join("")}</div></div>`
+    : null;
+
   const root = pickRoot();
-  if (txt(root).length < 2) return { ...base, ok: false, reason: "empty", scrollRounds: rounds };
+  if (txt(root).length < 2) return { ...base, ok: false, reason: "empty", scrollRounds: rounds, structureHtml, storyDetails: sd };
 
   // ---- 복제·정리 ----
   const abs = (u: string) => {
@@ -186,5 +326,7 @@ export async function captureProfileInPage(opts: { waitMs: number; maxRounds: nu
     imageUrls: [...images],
     stories,
     scrollRounds: rounds,
+    structureHtml,
+    storyDetails: sd,
   };
 }

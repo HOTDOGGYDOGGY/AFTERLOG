@@ -2,8 +2,9 @@
    - 화면 왼쪽 아래 작은 막대. 화면마다 버튼이 다르다(선택 수집 명세 6절):
      글 화면 '이 글 저장' · 밴드 화면 '이 밴드 글 전체 저장' · 인물 화면 '이 인물의 글 / 댓글만 / 댓글 단 글까지' ·
      인물 댓글 목록 '이 댓글 목록 저장 / 연결된 원글까지' · 공통 '골라서 저장…'(범위 정하기) · '수집 관리'
-   - 누르면 확장의 수집 관리 창이 열려 작업을 만들고 바로 시작한다. 이 스크립트는 밴드에 글·댓글·표정을 쓰지 않고, 페이지 내용을 읽지도 않는다.
-   - 밴드는 주소만 바뀌는 화면 전환을 하므로 주소를 주기적으로 확인해 버튼을 바꾼다. */
+   - 누르면 확장의 수집 관리 창이 열려 작업을 만들고 바로 시작한다. 이 스크립트는 밴드에 글·댓글·표정을 쓰지 않고, 글 내용을 읽지 않는다.
+   - 밴드는 주소만 바뀌는 화면 전환을 하고, 프로필은 주소 변화 없이 팝업으로 열리기도 한다(실제 저장 표본).
+     그래서 주소와 함께 '열린 프로필 팝업이 있는지'(화면 구조 표시만, 내용은 읽지 않음)를 주기적으로 확인해 버튼을 바꾼다. */
 (function () {
   "use strict";
   if (window.top !== window || document.getElementById("afterlog-collector-bar")) return;
@@ -20,6 +21,8 @@
     if (m) return { kind: "post", bandNo: m[1] };
     m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)\/comment\/?$/);
     if (m) return { kind: "memberComment", bandNo: m[1] };
+    m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)\/profile\/?$/);
+    if (m) return { kind: "profile", bandNo: m[1] };
     m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)(\/.*)?$/);
     if (m) return { kind: "member", bandNo: m[1] };
     m = u.pathname.match(/^\/band\/(\d+)(\/.*)?$/);
@@ -34,6 +37,10 @@
     post: [["post", "이 글 저장", true], ["form", "골라서 저장…"]],
     band: [["list", "이 밴드 글 전체 저장", true], ["form", "골라서 저장…"]],
     member: [["sel:A", "이 인물의 글", true], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["sel:P", "이 프로필 저장"], ["form", "골라서 저장…"]],
+    // 프로필 화면: 주 버튼은 프로필 저장(스토리·스토리 댓글 포함). 글·댓글 목록은 따로 고른다
+    profile: [["sel:P", "이 프로필 저장", true], ["sel:A", "이 인물의 글"], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["form", "골라서 저장…"]],
+    // 주소가 그대로인 프로필 팝업(멤버 목록 등 위에 열림)
+    popup: [["popup", "이 프로필 저장", true], ["form", "골라서 저장…"]],
     memberComment: [["sel:B", "이 댓글 목록 저장", true], ["sel:BC", "연결된 원글까지"], ["form", "골라서 저장…"]],
     search: [["search", "이 검색 결과 저장", true], ["form", "검색 조건 수정…"]],
   };
@@ -78,11 +85,25 @@
     }
   }
 
+  // 보이는 프로필 팝업이 하나 열려 있는가(구조 표시만 확인). 프로필 페이지 자체에서는 팝업으로 보지 않는다
+  function popupOpen() {
+    var els = document.querySelectorAll("[data-viewname='DProfileLayerView']");
+    var n = 0;
+    for (var i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && getComputedStyle(els[i]).visibility !== "hidden") n++;
+    }
+    return n;
+  }
+
   var last = "";
   function refresh() {
-    if (location.href === last) return;
-    last = location.href;
     var p = parse(location.href);
+    var pop = p && p.kind !== "profile" ? popupOpen() : 0;
+    var sig = location.href + "|" + pop;
+    if (sig === last) return;
+    last = sig;
+    if (p && pop) p = { kind: "popup", bandNo: p.bandNo };
     host.style.display = p ? "" : "none";
     if (!p) return;
     acts.textContent = "";

@@ -8,6 +8,8 @@ import { getProject, addAsset, addImport, guessMime, listSources } from "../stor
 import { buildDocument } from "./band/build";
 import { BAND_HTML_PARSER_VERSION, parseBandHtml, type BandPageParseResult } from "./band/html";
 import { BAND_TEXT_PARSER_VERSION, looksLikeBandText, parseBandText, type LineInfo } from "./band/text";
+import { parseBandProfileDocument, savedFromUrl, type BandProfileRecord } from "./band/profile";
+import { attachProfileImages, storeProfileRecord } from "./band/profileStore";
 
 export const ZIP_LIMITS = { maxEntries: 5000, maxTotalBytes: 300 * 1024 * 1024 };
 
@@ -30,6 +32,8 @@ export interface PendingImport {
   duplicateOf: SourceImport | null;
   sourceUrl: string | null;
   warnings: string[];
+  /** 저장 페이지에서 찾은 인물 프로필(프로필 페이지·프로필 팝업). 여러 HTML을 함께 넣으면 모두 */
+  profiles: { record: BandProfileRecord; fileName: string }[];
 }
 
 const basename = (p: string) => p.split(/[\\/]/).pop() ?? p;
@@ -149,13 +153,23 @@ export async function analyzeFiles(files: File[], projectId: string | null, past
 
   const rank: Record<SourceKind, number> = { "band-collector-capture": 0, "band-saved-page": 0, "band-html-fragment": 1, "band-plain-text": 2 };
   cands.sort((a, b) => rank[a.kind] - rank[b.kind]);
+  // 인물 프로필은 HTML마다 따로 읽는다(저장 페이지의 스크립트는 실행하지 않음). 배경 멤버 목록은 읽지 않는다
+  const profiles: PendingImport["profiles"] = [];
+  for (const c of cands)
+    if (c.kind !== "band-plain-text" && /DProfile(View|LayerView|StoryDetailView)/.test(c.text))
+      for (const record of parseBandProfileDocument(new DOMParser().parseFromString(c.text, "text/html"), { pageUrl: savedFromUrl(c.text) ?? sourceUrl, observedAt: null }))
+        profiles.push({ record, fileName: c.name });
+  // 게시글이 있는 HTML을 우선(프로필 페이지와 글 페이지를 함께 넣은 경우)
+  const hasPost = (c: Candidate) => c.kind !== "band-plain-text" && /cPostCard|DBandMemberCommentListView/.test(c.text) && parseBandHtml(c.text).documents.length > 0;
+  const postFirst = cands.findIndex(hasPost);
+  if (postFirst > 0) cands.unshift(...cands.splice(postFirst, 1));
   if (!cands.length)
     throw new Error(
       "가져올 내용이 없습니다. 밴드 게시글을 연 상태에서 '다른 이름으로 저장'한 .html(또는 폴더째 묶은 .zip), 게시글 영역의 HTML을 복사한 .txt, 또는 화면에서 복사한 글을 넣어 주세요.",
     );
   const main = cands[0];
   const others = cands.slice(1);
-  if (others.length) {
+  if (others.length && !profiles.length) {
     const label = { "band-collector-capture": "수집기", "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
     warnings.push(
       `입력이 ${cands.length}개 있어 가장 정확한 ${label[main.kind]}(${main.name})를 사용했습니다. 나머지(${others.map((o) => `${label[o.kind]} ${o.name}`).join(", ")})는 가져오지 않았습니다.`,
@@ -176,6 +190,8 @@ export async function analyzeFiles(files: File[], projectId: string | null, past
     parse = parseBandHtml(main.text);
   }
 
+  // 프로필만 있는 저장 페이지는 '게시글을 찾지 못함' 안내를 띄우지 않는다
+  if (profiles.length && !parse.documents.length) parse.notes = parse.notes.filter((n) => !/게시글 상세 화면이나 댓글 모음을 찾지 못했습니다/.test(n));
   const linkOnly = new Set<string>();
   for (const d of parse.documents) {
     for (const i of d.identities) if (i.avatarRef && i.avatarUrl) linkOnly.add(i.avatarRef);
@@ -201,11 +217,17 @@ export async function analyzeFiles(files: File[], projectId: string | null, past
     duplicateOf,
     sourceUrl,
     warnings,
+    profiles,
   };
 }
 
 /** 검토를 마친 가져오기를 프로젝트에 기록. 선택한 문서만 만든다. */
-export async function commitImport(projectId: string, pending: PendingImport, docIndexes: number[]): Promise<DocumentData[]> {
+export async function commitImport(projectId: string, pending: PendingImport, docIndexes: number[], profileIndexes: number[] = []): Promise<DocumentData[]> {
+  for (const i of profileIndexes) {
+    const p = pending.profiles[i];
+    if (!p) continue;
+    await storeProfileRecord(projectId, await attachProfileImages(projectId, p.record, pending.images), pending.sourceUrl);
+  }
   const assetMap = new Map<string, string>();
   for (const ref of pending.parse.imageRefs) {
     const blob = pending.images.get(ref);

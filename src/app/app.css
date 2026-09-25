@@ -2439,3 +2439,121 @@ hr {
   font-size: 16px;
   font-weight: 500;
 }
+/* 보관한 인물 프로필 보기 */
+.profile-main-title {
+  font-size: 18px;
+  margin: 0 0 10px;
+}
+.profile-drawer {
+  left: auto;
+  right: 0;
+  width: min(640px, 100%);
+}
+.profile-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pv-cover {
+  height: 150px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--canvas);
+}
+.pv-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pv-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.pv-face {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.pv-name {
+  margin: 0;
+  font-size: 20px;
+}
+.pv-desc {
+  margin: 2px 0;
+}
+.pv-warn {
+  color: #d97706;
+}
+.pv-missing {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pv-body {
+  padding: 6px 0;
+}
+.pv-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0 0 8px;
+}
+.pv-dl dt {
+  color: var(--muted);
+}
+.pv-dl dd {
+  margin: 0;
+}
+.pv-story {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+.pv-story-text {
+  white-space: pre-wrap;
+  margin: 6px 0;
+}
+.pv-img {
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: 8px;
+  display: block;
+  margin: 6px 0;
+}
+.pv-comments,
+.pv-replies,
+.pv-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+.pv-replies {
+  padding-left: 20px;
+  border-left: 2px solid var(--line);
+}
+.pv-comment {
+  margin: 8px 0;
+}
+.pv-c-head {
+  font-size: 13px;
+}
+.pv-c-head time {
+  color: var(--muted);
+}
+.pv-c-face {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.pv-c-body {
+  margin-left: 28px;
+  white-space: pre-wrap;
+}
+.pv-list li {
+  margin: 6px 0;
+}

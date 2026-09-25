@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { strToU8, zipSync, unzipSync, strFromU8 } from "fflate";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as C from "../../src/editor/commands";
-import { exportProjectFile, importProjectFile, importProjectFiles, mergeProjectFiles, readProjectFile } from "../../src/exporters/afterlog";
+import { exportProjectFile, importProjectFile, importProjectFiles, mergeProjectFiles, planMerge, applyMerge, undoMerge, readProjectFile } from "../../src/exporters/afterlog";
 import { analyzeFiles, commitImport } from "../../src/importers/importFiles";
 import { db } from "../../src/storage/db";
 import { ConflictError, createProject, getDocuments, getModuleState, listAssets, listModuleStates, listSources, purgeProject, putModuleState, saveDocument } from "../../src/storage/repo";
@@ -212,6 +212,7 @@ describe(".afterlog 지금 프로젝트에 합치기", () => {
     const n0 = Object.keys(cut.entries).length;
     const up = await mergeProjectFiles(full, q.id);
     expect(up.updated).toBe(1);
+    expect(up.commentsAdded).toBe(1);
     const after = (await getDocuments(q.id)).find((d) => d.inputFormat === "band-post")!;
     expect(Object.keys(after.entries).length).toBeGreaterThan(n0);
     expect(after.id).toBe(qPost.id);
@@ -235,5 +236,117 @@ describe(".afterlog 지금 프로젝트에 합치기", () => {
     expect(second).toMatchObject({ added: 0, sourcesAdded: 0, profilesAdded: 0 });
     expect(await getDocuments(q.id)).toHaveLength(nDocs);
     expect(await listSources(q.id)).toHaveLength(nSources);
+  });
+});
+
+describe("합치기: 항목 단위 보완·되돌리기·프로필(M03·M05·M07·M08)", () => {
+  it("M05 기존에만 있는 댓글은 남기고 새 파일의 새 댓글만 보탠다", async () => {
+    const { p } = await importFixture();
+    const { files: [{ blob: full }] } = await exportProjectFile(p.id);
+    const q = await createProject("대상");
+    await mergeProjectFiles(full, q.id);
+    // 대상에는 기존 글에 없던 댓글 하나(이전 수집에서만 보인 것)를 더해 두고, 들어오는 파일에서는 댓글 하나를 뺀다
+    const qPost = (await getDocuments(q.id)).find((d) => d.inputFormat === "band-post")!;
+    const onlyOld = C.duplicateEntry(qPost, Object.values(qPost.entries).filter((e) => e.kind !== "post")[0].id);
+    const extra = Object.values(onlyOld.entries).find((e) => !qPost.entries[e.id])!;
+    const withExtra = C.editTextBlock(onlyOld, extra.id, 0, "이전 수집에서만 보인 댓글");
+    const stored = structuredClone(withExtra);
+    stored.entries[extra.id].originalBlocks = stored.entries[extra.id].blocks;
+    await db().documents.put({ ...stored, revision: 1 });
+    const r = await mergeProjectFiles(full, q.id);
+    expect(r.added).toBe(0);
+    const after = (await getDocuments(q.id)).find((d) => d.inputFormat === "band-post")!;
+    expect(Object.values(after.entries).some((e) => JSON.stringify(e.blocks).includes("이전 수집에서만 보인 댓글"))).toBe(true);
+  });
+
+  it("M08 계획 뒤 프로젝트가 바뀌면 적용하지 않고, 되돌리기는 추가한 글·이미지를 지운다", async () => {
+    const { p } = await importFixture();
+    const { files: [{ blob }] } = await exportProjectFile(p.id);
+    const q = await createProject("대상");
+    const plan = await planMerge(blob, q.id);
+    await db().projects.update(q.id, { updatedAt: "2099-01-01T00:00:00.000Z" });
+    await expect(applyMerge(plan)).rejects.toThrow(/바뀌었습니다/);
+    expect(await getDocuments(q.id)).toHaveLength(0);
+    const plan2 = await planMerge(blob, q.id);
+    const undo = await applyMerge(plan2);
+    expect(await getDocuments(q.id)).toHaveLength(2);
+    expect((await listAssets(q.id)).length).toBeGreaterThan(0);
+    await undoMerge(undo);
+    expect(await getDocuments(q.id)).toHaveLength(0);
+    expect(await listAssets(q.id)).toHaveLength(0);
+    expect((await db().projects.get(q.id))!.documentIds).toHaveLength(0);
+  });
+
+  async function profileFile(record: object, title = "p") {
+    const pr = await createProject(title);
+    const bytes = new TextEncoder().encode(JSON.stringify(record));
+    await db().sources.add({ id: crypto.randomUUID(), projectId: pr.id, fileName: "프로필_x.json", mime: "application/json", importedAt: (record as { observedAt: string }).observedAt, parserVersion: "afterlog.band-profile/1", sha256: await (await import("../../src/storage/hash")).sha256Hex(bytes), kind: "band-profile-data" as never, sourceUrl: "https://www.band.us/band/1/member/K%3D/profile", blob: new Blob([bytes]) });
+    const { files: [{ blob }] } = await exportProjectFile(pr.id);
+    return blob;
+  }
+  const rec = (over: object) => ({
+    schema: "afterlog.band-profile/1", platform: "band", surface: "profilePage", bandNo: "1", memberKey: "K=", identity: "confirmed", sourceUrl: null, profileUrl: "https://www.band.us/band/1/member/K%3D/profile",
+    observedAt: "2026-09-01T00:00:00.000Z", name: "가상인물", description: "소개", info: null, joinInfo: null, avatar: null, cover: null, reactionsShown: 1, commentsShown: 0, storyCountShown: null,
+    photoHistory: { state: "unrecognized", items: [] }, stories: { state: "collected", items: [{ key: "a#1", order: 0, timeText: "2026년 1월 1일", local: null, text: "하나", textSource: "detail", images: [], links: [], reactionsShown: 0, commentsShown: 0, comments: [], commentsState: "none" }] }, notes: [], ...over,
+  });
+
+  it("M03 같은 인물의 새 파일: 프로필을 새로 만들지 않고 새 스토리만 보탠다. 같은 파일은 완전 중복", async () => {
+    const a = await profileFile(rec({}), "a");
+    const b = await profileFile(rec({ observedAt: "2026-09-20T00:00:00.000Z", reactionsShown: 3, stories: { state: "collected", items: [...(rec({}) as { stories: { items: object[] } }).stories.items, { key: "b#1", order: 1, timeText: "2026년 2월 1일", local: null, text: "둘", textSource: "detail", images: [], links: [], reactionsShown: 0, commentsShown: 0, comments: [], commentsState: "none" }] } }), "b");
+    const q = await createProject("대상");
+    expect((await mergeProjectFiles(a, q.id)).profilesAdded).toBe(1);
+    const r = await mergeProjectFiles(b, q.id);
+    expect(r).toMatchObject({ profilesAdded: 0, profilesUpdated: 1 });
+    const data = (await listSources(q.id)).filter((x) => String(x.kind) === "band-profile-data");
+    expect(data).toHaveLength(1);
+    const merged = JSON.parse(await data[0].blob.text());
+    expect(merged.stories.items).toHaveLength(2);
+    expect(merged.reactionsShown).toBe(3);
+    expect(merged.history[0].reactionsShown).toBe(1);
+    expect((await mergeProjectFiles(b, q.id)).profilesSkipped).toBe(1);
+  });
+
+  it("M07 식별자 없는 팝업 프로필은 이름이 같아도 합치지 않는다", async () => {
+    const a = await profileFile(rec({ surface: "profilePopup", memberKey: null, identity: "unconfirmed", profileUrl: null }), "a");
+    const b = await profileFile(rec({ surface: "profilePopup", memberKey: null, identity: "unconfirmed", profileUrl: null, description: "다른 소개" }), "b");
+    const q = await createProject("대상");
+    await mergeProjectFiles(a, q.id);
+    expect((await mergeProjectFiles(b, q.id)).profilesAdded).toBe(1);
+    expect((await listSources(q.id)).filter((x) => String(x.kind) === "band-profile-data")).toHaveLength(2);
+  });
+});
+
+describe("저장 페이지의 인물 프로필 가져오기(H01·H02)", () => {
+  const PDIR = FIXTURE_DIR + "profile/";
+  it("프로필 페이지 + 멤버 팝업 두 HTML을 한 번에: 각각 프로필로, 이미지 파일은 이름으로 연결하고 없으면 미확보", async () => {
+    const files = [
+      new File([readFileSync(PDIR + "profile-page.html")], "프로필 _ 가상밴드.html", { type: "text/html" }),
+      new File([readFileSync(PDIR + "member-popup.html")], "멤버 _ 가상밴드.html", { type: "text/html" }),
+      new File([readFileSync(FIXTURE_DIR + "page_files/avatar_garam.png")], "avatar_a.jpg", { type: "image/png" }),
+    ];
+    const p = await createProject("프로필");
+    const pending = await analyzeFiles(files, p.id);
+    expect(pending.profiles.map((x) => [x.record.surface, x.record.name])).toEqual([
+      ["profilePage", "가상인물"],
+      ["profilePopup", "가상인물"],
+    ]);
+    expect(pending.parse.documents).toHaveLength(0);
+    expect(pending.parse.notes.join()).not.toContain("찾지 못했습니다");
+    await commitImport(p.id, pending, [], [0, 1]);
+    const data = (await listSources(p.id)).filter((x) => String(x.kind) === "band-profile-data");
+    // 팝업은 식별자가 없어 같은 이름이어도 따로(P05·M07)
+    expect(data).toHaveLength(2);
+    const page = JSON.parse(await data.map((x) => x).find((x) => x.sourceUrl?.includes("/profile"))!.blob.text());
+    expect(page.avatar.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(page.cover.sha256 ?? null).toBeNull();
+    // 저장 페이지 스크립트·확장 막대·입력칸은 자료에 섞이지 않는다
+    const all = JSON.stringify(page);
+    expect(all).not.toContain("__should_not_run");
+    expect(all).not.toContain("확장 도구막대");
+    expect(all).not.toContain("로그인한 나");
+    // 같은 페이지를 다시 가져오면 같은 인물로 보고 늘지 않는다
+    const again = await analyzeFiles([files[0]], p.id);
+    await commitImport(p.id, again, [], [0]);
+    expect((await listSources(p.id)).filter((x) => String(x.kind) === "band-profile-data")).toHaveLength(2);
   });
 });

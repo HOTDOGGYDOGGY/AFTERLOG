@@ -6,7 +6,7 @@ import type { DocumentData } from "../domain/types";
 import { createProject, getDocuments, getProject } from "../storage/repo";
 import { exportProjectFile } from "../exporters/afterlog";
 import { ProjectDrawer } from "./panels/ProjectDrawer";
-import { importProjectFiles, mergeProjectFiles } from "../exporters/afterlog";
+import { importProjectFiles, applyMerge, planMerge, undoMerge, mergeSummary, type MergePlan } from "../exporters/afterlog";
 import { Shell } from "./shell/Shell";
 import { useAppTheme } from "./shell/useAppTheme";
 import { PLATFORMS, platformOf, type PlatformId } from "./shell/platforms";
@@ -45,7 +45,9 @@ export function App() {
   const [drawer, setDrawer] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fatal, setFatal] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string; actions?: { label: string; run(): void }[] } | null>(null);
+  // 합치기 전 분석 결과(새 항목·보완·완전 중복·확인 필요). 확인하면 한 번에 적용
+  const [pendingMerge, setPendingMerge] = useState<{ files: File[]; plan: MergePlan | null; error: string | null } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   // 한 번 연 기존 도구는 숨겨서 유지(같은 창 안의 입력·설정 보존)
   const [visited, setVisited] = useState<Set<PlatformId>>(() => new Set([route.platform]));
@@ -108,21 +110,20 @@ export function App() {
     return p.id;
   }, [projectId]);
 
-  // .afterlog 열기: 새 사본 프로젝트(new) 또는 지금 프로젝트에 합치기(merge, 같은 글·프로필은 건너뜀)
-  const openProjectFiles = async (files: File[], mode: "new" | "merge") => {
-    if (mode === "merge" && projectId) {
+  // .afterlog 열기: 새 사본 프로젝트(new) · 지금 프로젝트에 합치기(merge) · 지금 프로젝트가 있으면 분석해 보여 주고 고르기(ask)
+  const openProjectFiles = async (files: File[], mode: "new" | "merge" | "ask") => {
+    if ((mode === "ask" || mode === "merge") && projectId) {
       await flushAll();
-      const r = await mergeProjectFiles(files, projectId);
-      setRefreshKey((k) => k + 1);
-      await loadProject(projectId);
-      const parts = [
-        `새 글 ${r.added}개`,
-        r.updated ? `더 많이 확보한 글로 갱신 ${r.updated}개` : "",
-        r.skipped ? `이미 있는 글 건너뜀 ${r.skipped}개${r.keptEdited ? `(고친 글이라 그대로 둔 ${r.keptEdited}개 포함)` : ""}` : "",
-        r.profilesAdded ? `프로필 보관본 ${r.profilesAdded}개` : "",
-        r.missingParts.length ? `빠진 파트 ${r.missingParts.join(", ")}번(그 파트의 이미지 없음)` : "",
-      ].filter(Boolean);
-      setNotice({ kind: "ok", text: `지금 프로젝트에 합쳤습니다: ${parts.join(" · ")}.` });
+      setPendingMerge({ files, plan: null, error: null });
+      try {
+        const plan = await planMerge(files, projectId);
+        if (mode === "merge") {
+          setPendingMerge(null);
+          await runMerge(plan);
+        } else setPendingMerge({ files, plan, error: null });
+      } catch (e) {
+        setPendingMerge({ files, plan: null, error: (e as Error).message });
+      }
       return;
     }
     const r = await importProjectFiles(files);
@@ -130,6 +131,30 @@ export function App() {
     await switchProject(r.project.id);
     if (r.missingParts.length)
       setNotice({ kind: "error", text: `"${r.project.title}"을(를) 불러왔지만 ${r.partCount}개 파트 중 ${r.missingParts.join(", ")}번 파트가 없어 이미지 ${r.missingAssets}개가 빠졌습니다. 빠진 파트와 함께 다시 불러오면 채워집니다.` });
+  };
+
+  const runMerge = async (plan: MergePlan) => {
+    const undo = await applyMerge(plan);
+    setRefreshKey((k) => k + 1);
+    await loadProject(plan.targetProjectId);
+    const text = mergeSummary(plan.counts);
+    setNotice({
+      kind: "ok",
+      text: `지금 프로젝트에 합쳤습니다. ${text}`,
+      actions: [
+        {
+          label: "이번 합치기 되돌리기",
+          run: () =>
+            void (async () => {
+              await flushAll();
+              const r = await undoMerge(undo);
+              setRefreshKey((k) => k + 1);
+              await loadProject(plan.targetProjectId);
+              setNotice({ kind: r.conflicts ? "error" : "ok", text: r.conflicts ? `되돌렸습니다. 합친 뒤 고친 글 ${r.conflicts}개는 그대로 두었습니다.` : "이번 합치기를 되돌렸습니다." });
+            })().catch((e) => setNotice({ kind: "error", text: `되돌리기 실패: ${(e as Error).message}` })),
+        },
+      ],
+    });
   };
 
   const switchProject = useCallback(
@@ -180,9 +205,59 @@ export function App() {
       onThemeMode={theme.setMode}
     >
       {fatal ? <p className="banner error">{fatal}</p> : null}
+      {pendingMerge ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal modal-small merge-preview" role="dialog" aria-modal="true" aria-label=".afterlog 합치기">
+            <h2>'{projectTitle}'에 합치기</h2>
+            {pendingMerge.error ? (
+              <p className="notice error">{pendingMerge.error}</p>
+            ) : pendingMerge.plan ? (
+              <>
+                <p>{mergeSummary(pendingMerge.plan.counts)}</p>
+                <p className="small muted">같은 글·같은 인물은 새로 만들지 않고, 새 댓글·스토리·정보만 보탭니다. 기존 댓글과 사용자가 고친 내용은 지우거나 덮지 않습니다. 합친 뒤 '이번 합치기 되돌리기'로 취소할 수 있습니다.</p>
+              </>
+            ) : (
+              <p className="muted">파일을 확인하는 중…</p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="ui-btn ui-btn-quiet" onClick={() => setPendingMerge(null)}>
+                취소
+              </button>
+              <button
+                type="button"
+                className="ui-btn"
+                onClick={() => {
+                  const f = pendingMerge.files;
+                  setPendingMerge(null);
+                  void openProjectFiles(f, "new").catch((e) => setNotice({ kind: "error", text: (e as Error).message }));
+                }}
+              >
+                새 프로젝트로 열기
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-primary"
+                disabled={!pendingMerge.plan}
+                onClick={() => {
+                  const plan = pendingMerge.plan!;
+                  setPendingMerge(null);
+                  void runMerge(plan).catch((e) => setNotice({ kind: "error", text: `합치기 실패(프로젝트는 그대로입니다): ${(e as Error).message}` }));
+                }}
+              >
+                합치기
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {notice ? (
         <div className={`banner ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
           {notice.text}
+          {notice.actions?.map((a) => (
+            <button key={a.label} type="button" className="ui-btn ui-btn-quiet" onClick={a.run}>
+              {a.label}
+            </button>
+          ))}
           <button type="button" className="ui-icon-btn" aria-label="알림 닫기" onClick={() => setNotice(null)}>
             <Icon name="close" size={14} />
           </button>
@@ -203,6 +278,7 @@ export function App() {
             reload={reloadDocs}
             appTheme={theme.resolved}
             registerFlush={registerFlush}
+            dataVersion={refreshKey}
             onOpenProjectFiles={(files, mode) => openProjectFiles(files, mode)}
             onImported={(pid, created) => {
               setRefreshKey((k) => k + 1);
@@ -244,7 +320,7 @@ export function App() {
           }}
           onMerge={(fs) => {
             setDrawer(false);
-            void openProjectFiles(fs, "merge").catch((e) => setNotice({ kind: "error", text: `합치기 실패: ${(e as Error).message}` }));
+            void openProjectFiles(fs, "ask").catch((e) => setNotice({ kind: "error", text: `합치기 실패: ${(e as Error).message}` }));
           }}
         />
       ) : null}

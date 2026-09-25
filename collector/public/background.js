@@ -19,6 +19,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     q.set("new", "sel");
     q.set("modes", msg.act.slice(4));
     q.set("url", sender.tab.url || "");
+  } else if (msg.act === "popup") {
+    // 주소가 그대로인 프로필 팝업: 그 탭에서 팝업을 그대로 읽는다(탭 번호는 브라우저가 붙인 것만)
+    q.set("new", "popup");
+    q.set("tabId", String(sender.tab.id));
+    q.set("url", sender.tab.url || "");
   } else if (msg.act === "search") {
     // 사용자가 연 검색 결과(주소를 그대로 넘긴다)
     q.set("new", "search");

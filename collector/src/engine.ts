@@ -2,6 +2,7 @@
 // 상태는 전부 DB에 두고(메모리에 작업을 들고 있지 않음), 한 과제의 결과와 완료 표시는 한 트랜잭션에서 확정한다.
 // 창이 닫히거나 확장이 업데이트되어도 점유(lease)가 끝난 과제는 다시 대기열로 돌아가 이어받는다.
 import { parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
+import { parseBandProfileDocument, profileImages } from "../../src/importers/band/profile";
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type SelectReason, type Selection, type Task } from "./db";
 import { parseKoreanDateTime } from "../../src/importers/band/time";
@@ -727,50 +728,125 @@ export class Engine {
 
   // ---------- 인물 프로필 ----------
 
-  /** 프로필 화면 보관본(스냅숏). 구조를 해석하지 않고 보이는 모습 그대로 + 이미지. 아무것도 누르지 않는다 */
+  /**
+   * 인물 프로필: 구조 자료(기본 정보·스토리·스토리 상세의 전문·반응 수·댓글) + 보관 화면(스냅숏).
+   * 프로필 페이지는 수집 탭에서 열고, 주소가 바뀌지 않는 팝업은 사용자 탭에서 그대로 읽는다(누르지 않음).
+   * 한 영역이 모자라도 먼저 읽은 기본 정보는 저장한다(성공/실패 하나로 뭉개지 않음).
+   */
   private async runProfile(job: Job, task: Task, diag: DiagRecorder): Promise<{ ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" }> {
     const br = this.deps.browser;
-    const m = parseMemberUrl(task.url);
-    if (!br.captureProfile || !m) return { ok: false, code: "navigationFailed", text: "인물 프로필 주소가 아닙니다.", retry: false };
-    await this.gate();
-    const { ex, loadMs } = await br.captureProfile(task.url);
-    await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", wait: durationBucket(loadMs), page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
-    if (!ex.ok) {
-      if (ex.reason === "login") return { ok: false, code: "loginRequired", text: "밴드에 로그인해야 합니다. 로그인한 뒤 이어받기를 누르세요.", retry: false, stopJob: "needsUser" };
-      await diag.event(task.id, { stage: "profile", state: "fail", code: "selectorMissing" });
-      return { ok: false, code: "selectorMissing", text: "프로필 화면 내용을 찾지 못했습니다(권한·화면 구조 변경 가능).", retry: true };
+    const observedAt = iso(this.now());
+    const loginStop = { ok: false as const, code: "loginRequired", text: "밴드에 로그인해야 합니다. 로그인한 뒤 이어받기를 누르세요.", retry: false, stopJob: "needsUser" as const };
+    let cap: ProfileCapture;
+    let partialWhy: string[] = [];
+    let queue: string[] = [];
+
+    if (task.tabId !== undefined) {
+      // 팝업(멤버 목록 등 같은 주소 위에 열린 프로필)
+      if (!br.captureProfilePopup) return { ok: false, code: "navigationFailed", text: "이 브라우저에서는 팝업을 읽을 수 없습니다.", retry: false };
+      const ex = await br.captureProfilePopup(task.tabId);
+      await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
+      if (!ex.ok) {
+        if (ex.reason === "login") return loginStop;
+        await diag.event(task.id, { stage: "profile", state: "fail", code: ex.reason === "multiple" ? "multipleScopes" : "selectorMissing" });
+        return {
+          ok: false,
+          code: ex.reason === "multiple" ? "multipleScopes" : "selectorMissing",
+          text: ex.reason === "multiple" ? "프로필 팝업이 여러 개 보여 어느 것인지 고르지 못했습니다. 저장할 프로필 하나만 연 뒤 다시 누르세요." : "열린 프로필 팝업을 찾지 못했습니다. 팝업을 다시 연 뒤 저장하세요.",
+          retry: false,
+        };
+      }
+      const record = parseBandProfileDocument(new DOMParser().parseFromString(ex.html ?? "", "text/html"), { pageUrl: ex.pageUrl, observedAt })[0] ?? null;
+      if (!record) return { ok: false, code: "selectorMissing", text: "팝업에서 프로필 내용을 알아보지 못했습니다(화면 구조 변경 가능).", retry: false };
+      cap = {
+        id: crypto.randomUUID(),
+        jobId: job.id,
+        taskId: task.id,
+        bandNo: record.bandNo ?? job.bandNo ?? "",
+        memberKey: record.memberKey ?? "",
+        url: ex.pageUrl,
+        name: record.name,
+        description: record.description,
+        html: ex.html ?? "",
+        css: "",
+        cssTruncated: false,
+        imageUrls: ex.imageUrls,
+        stories: [],
+        capturedAt: observedAt,
+        collectorVersion: COLLECTOR_VERSION,
+        record,
+        surface: "profilePopup",
+      };
+      queue = ex.imageUrls;
+      if (record.stories.state === "notCollected") partialWhy.push(`스토리 ${record.storyCountShown ?? ""}개는 팝업에 없어 모으지 않음('스토리 보기'로 프로필 화면을 연 뒤 '이 프로필 저장')`);
+    } else {
+      const m = parseMemberUrl(task.url);
+      if (!br.captureProfile || !m) return { ok: false, code: "navigationFailed", text: "인물 프로필 주소가 아닙니다.", retry: false };
+      await this.gate();
+      const { ex, loadMs } = await br.captureProfile(task.url);
+      await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", wait: durationBucket(loadMs), page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
+      if (!ex.ok) {
+        if (ex.reason === "login") return loginStop;
+        await diag.event(task.id, { stage: "profile", state: "fail", code: "selectorMissing" });
+        return { ok: false, code: "selectorMissing", text: "프로필 화면 내용을 찾지 못했습니다(권한·화면 구조 변경 가능).", retry: true };
+      }
+      const record = ex.structureHtml ? parseBandProfileDocument(new DOMParser().parseFromString(ex.structureHtml, "text/html"), { pageUrl: ex.pageUrl, observedAt }).find((r) => r.surface === "profilePage") ?? null : null;
+      // 연 화면이 요청한 인물인지(주소가 달라졌거나 다른 인물이 열렸으면 섞지 않는다)
+      if (record && record.memberKey && record.memberKey !== m.memberKey) {
+        await diag.event(task.id, { stage: "scope", state: "fail", code: "accountChanged" });
+        return { ok: false, code: "navigationFailed", text: "요청한 인물과 다른 프로필이 열렸습니다. 다시 시도하세요.", retry: true };
+      }
+      const sd = ex.storyDetails;
+      if (!record) partialWhy.push("프로필 화면 구조를 알아보지 못해 보관 화면만 저장(스토리 전문·댓글 없음)");
+      else {
+        if (record.stories.state === "unrecognized") partialWhy.push("스토리 목록을 찾지 못함(구조 미인식 또는 표시되지 않음)");
+        if (sd && sd.opened < sd.listed) partialWhy.push(`스토리 상세 ${sd.listed}개 중 ${sd.opened}개만 열어 읽음${sd.stoppedEarly ? "(시간 한도·닫기 실패로 멈춤)" : ""}`);
+        const short = record.stories.items.filter((x) => x.commentsState === "partial").length;
+        if (short) partialWhy.push(`댓글이 모자란 스토리 ${short}개`);
+      }
+      await diag.event(task.id, {
+        stage: "profile",
+        state: partialWhy.length ? "partial" : "ok",
+        count: countBucket(record?.stories.items.length ?? ex.stories.length),
+        candidates: countBucket(sd?.listed ?? 0),
+        ...(sd?.mismatched ? { code: "multipleScopes" as const } : {}),
+      });
+      cap = {
+        id: crypto.randomUUID(),
+        jobId: job.id,
+        taskId: task.id,
+        bandNo: m.bandNo,
+        memberKey: m.memberKey,
+        url: task.url,
+        name: record?.name ?? ex.name,
+        description: record?.description ?? ex.description,
+        html: ex.html!,
+        css: ex.css,
+        cssTruncated: ex.cssTruncated,
+        imageUrls: ex.imageUrls,
+        stories: ex.stories,
+        capturedAt: observedAt,
+        collectorVersion: COLLECTOR_VERSION,
+        record,
+        surface: "profilePage",
+      };
+      queue = [...new Set([...ex.imageUrls, ...(record ? profileImages(record).map((i) => i.src).filter((u) => /^https?:/.test(u)) : [])])];
     }
-    await diag.event(task.id, { stage: "profile", state: ex.cssTruncated ? "partial" : "ok", count: countBucket(ex.stories.length), candidates: countBucket(ex.imageUrls.length) });
-    const cap: ProfileCapture = {
-      id: crypto.randomUUID(),
-      jobId: job.id,
-      taskId: task.id,
-      bandNo: m.bandNo,
-      memberKey: m.memberKey,
-      url: task.url,
-      name: ex.name,
-      description: ex.description,
-      html: ex.html!,
-      css: ex.css,
-      cssTruncated: ex.cssTruncated,
-      imageUrls: ex.imageUrls,
-      stories: ex.stories,
-      capturedAt: iso(this.now()),
-      collectorVersion: COLLECTOR_VERSION,
-    };
+    const record = cap.record;
+    const storyCount = record ? record.stories.items.length : cap.stories.length;
     await cdb().transaction("rw", [cdb().profiles, cdb().tasks], async () => {
       await cdb().profiles.where("taskId").equals(task.id).delete();
       await cdb().profiles.add(cap);
       await cdb().tasks.update(task.id, {
-        status: "succeeded",
+        status: partialWhy.length ? "partial" : "succeeded",
         leaseUntil: 0,
-        errorCode: null,
-        errorText: null,
-        result: { title: `프로필${ex.name ? ` · ${ex.name}` : ""}`, stories: ex.stories.length, images: ex.imageUrls.length },
+        errorCode: partialWhy.length ? "profilePartial" : null,
+        errorText: partialWhy.length ? partialWhy.join(" · ") : null,
+        result: { title: `프로필${cap.name ? ` · ${cap.name}` : ""}`, stories: storyCount, images: queue.length, memberName: cap.name },
       });
     });
-    if (ex.name) await this.learnMemberName(job.id, m.memberKey, ex.name);
-    if (job.options.includeImages) this.queueAssets(ex.imageUrls, task.id, diag);
+    if (cap.name && cap.memberKey) await this.learnMemberName(job.id, cap.memberKey, cap.name);
+    if (job.options.includeImages) this.queueAssets(queue, task.id, diag);
     return { ok: true };
   }
 
@@ -1073,6 +1149,8 @@ export async function createJob(input: {
   bandNo: string | null;
   posts?: { url: string; key: string; tabId?: number }[];
   lists?: string[];
+  /** 프로필(주소, 팝업이면 사용자 탭 번호) */
+  profiles?: { url: string; tabId?: number }[];
   now?: number;
 }): Promise<Job> {
   // 선택 수집: 인물마다 작성글 목록(A)·작성댓글 목록(B·C) 과제를 만든다. 밴드 전체 목록은 먼저 훑지 않는다(7.1)
@@ -1115,6 +1193,8 @@ export async function createJob(input: {
     tasks.push({ ...base, id: crypto.randomUUID(), key: `${l.kind}:${l.url}`, kind: l.kind, url: l.url, listReason: l.reason, memberKey: l.memberKey || undefined, order: order++ });
   for (const p of input.posts ?? [])
     tasks.push({ ...base, id: crypto.randomUUID(), key: p.key, kind: "post", url: p.url, tabId: p.tabId, reasons: ["url"], order: order++ });
+  for (const p of input.profiles ?? [])
+    tasks.push({ ...base, id: crypto.randomUUID(), key: `profile:${p.url}${p.tabId !== undefined ? `#tab${p.tabId}` : ""}`, kind: "profile", url: p.url, tabId: p.tabId, listReason: "list", order: order++ });
   await cdb().transaction("rw", [cdb().jobs, cdb().tasks, cdb().captures], async () => {
     await cdb().jobs.add(job);
     for (const t of tasks) {
