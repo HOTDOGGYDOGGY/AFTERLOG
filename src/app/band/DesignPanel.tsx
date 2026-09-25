@@ -21,7 +21,7 @@ const SECTIONS: [Section, string, string][] = [
 
 const ROLE_LABEL: Record<TextRole, string> = { name: "이름", desc: "소개", body: "본문", comment: "댓글", meta: "시각·메타" };
 const SKIN_LABEL: [CommentSkin, string][] = [
-  ["band", "밴드 원형"],
+  ["band", "밴드형"],
   ["linear", "선형 목록"],
   ["bubble", "말풍선"],
   ["card", "카드"],
