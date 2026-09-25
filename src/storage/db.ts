@@ -6,8 +6,22 @@ export interface StoredAsset extends Asset {
   createdAt: string;
 }
 
+/**
+ * 기존 도구(카톡·카페·트위터·DM)와 원문 보관(짓시)의 상태. 새 공통 문서 모델로 억지로 바꾸지 않고
+ * 모듈 ID·상태 버전과 함께 그대로 보관한다(명세 v1.2 15.5).
+ */
+export interface ModuleState {
+  projectId: string;
+  moduleId: string;
+  stateVersion: number;
+  /** 모듈이 돌려준 상태(JSON). 이미지는 data URL로 들어 있다 */
+  payload: unknown;
+  updatedAt: string;
+}
+
 export class AfterlogDB extends Dexie {
   projects!: Table<Project, string>;
+  modules!: Table<ModuleState, [string, string]>;
   documents!: Table<DocumentData, string>;
   sources!: Table<SourceImport, string>;
   assets!: Table<StoredAsset, string>;
@@ -19,6 +33,9 @@ export class AfterlogDB extends Dexie {
       documents: "id, projectId",
       sources: "id, projectId, sha256",
       assets: "id, projectId, [projectId+sha256]",
+    });
+    this.version(2).stores({
+      modules: "[projectId+moduleId], projectId",
     });
   }
 }

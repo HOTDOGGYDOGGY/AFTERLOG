@@ -3,7 +3,7 @@ import { newId, nowIso } from "../domain/ids";
 import { SCHEMA_VERSION, type DocumentData, type Project, type SourceImport } from "../domain/types";
 import { sha256Hex } from "./hash";
 import { normalizeDocument } from "../domain/migrate";
-import { db, type StoredAsset } from "./db";
+import { db, type ModuleState, type StoredAsset } from "./db";
 
 export class ConflictError extends Error {
   name = "ConflictError";
@@ -37,7 +37,8 @@ export async function trashProject(id: string, trashed: boolean) {
 /** 영구 삭제: 프로젝트의 문서·원문·자산을 한 트랜잭션에서 지운다 */
 export async function purgeProject(id: string) {
   const d = db();
-  await d.transaction("rw", [d.projects, d.documents, d.sources, d.assets], async () => {
+  await d.transaction("rw", [d.projects, d.documents, d.sources, d.assets, d.modules], async () => {
+    await d.modules.where("projectId").equals(id).delete();
     await d.documents.where("projectId").equals(id).delete();
     await d.sources.where("projectId").equals(id).delete();
     await d.assets.where("projectId").equals(id).delete();
@@ -132,4 +133,24 @@ export async function deleteAsset(id: string) {
 
 export async function listSources(projectId: string) {
   return db().sources.where("projectId").equals(projectId).toArray();
+}
+
+// ---------- 기존 도구·원문 보관 모듈 상태 ----------
+
+export async function getModuleState(projectId: string, moduleId: string): Promise<ModuleState | undefined> {
+  return db().modules.get([projectId, moduleId]);
+}
+
+export async function listModuleStates(projectId: string): Promise<ModuleState[]> {
+  return db().modules.where("projectId").equals(projectId).toArray();
+}
+
+/** 모듈 상태 저장. 트랜잭션이 끝나야 성공으로 본다 */
+export async function putModuleState(state: Omit<ModuleState, "updatedAt">): Promise<void> {
+  const d = db();
+  const now = nowIso();
+  await d.transaction("rw", [d.modules, d.projects], async () => {
+    await d.modules.put({ ...state, updatedAt: now });
+    await d.projects.update(state.projectId, { updatedAt: now });
+  });
 }

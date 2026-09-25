@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Project } from "../../domain/types";
 import { listProjects, purgeProject, renameProject, trashProject } from "../../storage/repo";
-import { importProjectFiles } from "../../exporters/afterlog";
+import { exportProjectFile, importProjectFiles } from "../../exporters/afterlog";
+import { db } from "../../storage/db";
 import { pickFiles } from "../download";
+import { Icon } from "../../components/Icon";
+import { platformOf } from "../shell/platforms";
 
 export function ProjectDrawer({
   currentId,
@@ -10,22 +13,39 @@ export function ProjectDrawer({
   onClose,
   onCurrentRemoved,
   refreshKey,
+  onRenamed,
+  onNew,
 }: {
   currentId: string | null;
   onOpen(id: string): void;
   onClose(): void;
   onCurrentRemoved(): void;
   refreshKey: number;
+  onRenamed?(id: string, title: string): void;
+  /** 빈 상태로 새로 시작(다음에 자료를 넣으면 임시 이름으로 만들어짐) */
+  onNew?(): void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [modules, setModules] = useState<Map<string, string[]>>(new Map());
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<"recent" | "name">("recent");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const reload = async () => setProjects(await listProjects());
+  const reload = async () => {
+    setProjects(await listProjects());
+    const m = new Map<string, string[]>();
+    for (const r of await db().modules.toArray()) m.set(r.projectId, [...(m.get(r.projectId) ?? []), r.moduleId]);
+    setModules(m);
+  };
   useEffect(() => {
     void reload();
   }, [refreshKey]);
 
-  const active = projects.filter((p) => !p.deletedAt);
+  const active = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = projects.filter((p) => !p.deletedAt && (!needle || p.title.toLowerCase().includes(needle)));
+    return sort === "name" ? [...list].sort((a, b) => a.title.localeCompare(b.title, "ko")) : list;
+  }, [projects, q, sort]);
   const trashed = projects.filter((p) => p.deletedAt);
 
   const load = async () => {
@@ -57,15 +77,29 @@ export function ProjectDrawer({
         <div className="panel-head">
           <strong>프로젝트</strong>
           <button type="button" className="ui-icon-btn" aria-label="닫기" onClick={onClose}>
-            ×
+            <Icon name="close" size={16} />
           </button>
         </div>
         <div className="panel-body">
-          <button type="button" className="ui-btn" disabled={busy} onClick={load}>
-            {busy ? "불러오는 중…" : "프로젝트 파일(.afterlog) 불러오기"}
-          </button>
+          <div className="row-actions">
+            {onNew ? (
+              <button type="button" className="ui-btn" onClick={onNew}>
+                <Icon name="plus" size={14} /> 새 프로젝트
+              </button>
+            ) : null}
+            <button type="button" className="ui-btn" disabled={busy} onClick={load}>
+              <Icon name="folder" size={14} /> {busy ? "불러오는 중…" : "파일 열기 (.afterlog)"}
+            </button>
+          </div>
           <small className="muted">불러오면 항상 새 사본이 만들어지고 지금 프로젝트는 그대로 남습니다. 여러 파트로 나뉜 파일은 한꺼번에 선택하세요. 수집 확장이 만든 파일도 여기서 엽니다.</small>
           {msg ? <p className={`notice ${msg.kind}`}>{msg.text}</p> : null}
+          <div className="project-filter">
+            <input type="search" placeholder="프로젝트 이름으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="프로젝트 찾기" />
+            <select value={sort} onChange={(e) => setSort(e.target.value as "recent" | "name")} aria-label="정렬">
+              <option value="recent">최근 작업</option>
+              <option value="name">이름</option>
+            </select>
+          </div>
           <ul className="project-list">
             {active.map((p) => (
               <li key={p.id} className={p.id === currentId ? "is-current" : undefined}>
@@ -74,7 +108,8 @@ export function ProjectDrawer({
                     {p.title}
                   </span>
                   <small className="muted">
-                    문서 {p.documentIds.length} · {new Date(p.updatedAt).toLocaleString()}
+                    {[p.documentIds.length ? `밴드 글 ${p.documentIds.length}` : "", ...(modules.get(p.id) ?? []).map((m) => platformOf(m).label)].filter(Boolean).join(" · ") || "비어 있음"} ·{" "}
+                    {new Date(p.updatedAt).toLocaleString()} · 이 브라우저에 저장됨
                   </small>
                 </button>
                 <button
@@ -86,11 +121,35 @@ export function ProjectDrawer({
                     const t = window.prompt("프로젝트 이름", p.title);
                     if (t && t.trim()) {
                       await renameProject(p.id, t.trim());
+                      onRenamed?.(p.id, t.trim());
                       await reload();
                     }
                   }}
                 >
-                  ✎
+                  <Icon name="edit" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="ui-icon-btn"
+                  aria-label={`${p.title} 복제`}
+                  title="복제(새 사본)"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const { files } = await exportProjectFile(p.id);
+                      const r = await importProjectFiles(files.map((f) => f.blob));
+                      await renameProject(r.project.id, `${p.title} 사본`);
+                      await reload();
+                      setMsg({ kind: "ok", text: `"${p.title} 사본"을 만들었습니다.` });
+                    } catch (e) {
+                      setMsg({ kind: "error", text: `복제 실패: ${(e as Error).message}` });
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <Icon name="plus" size={15} />
                 </button>
                 <button
                   type="button"
@@ -103,7 +162,7 @@ export function ProjectDrawer({
                     await reload();
                   }}
                 >
-                  ✕
+                  <Icon name="close" size={15} />
                 </button>
               </li>
             ))}

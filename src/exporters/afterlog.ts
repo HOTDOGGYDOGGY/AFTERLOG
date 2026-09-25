@@ -3,7 +3,7 @@ import { newId, nowIso } from "../domain/ids";
 import { ROOT, SCHEMA_VERSION, type ContentBlock, type DocumentData, type Project, type ReviewIssue, type SourceImport } from "../domain/types";
 import { normalizeDocument } from "../domain/migrate";
 import { db, type StoredAsset } from "../storage/db";
-import { getDocuments, listAssets, listSources } from "../storage/repo";
+import { getDocuments, listAssets, listModuleStates, listSources } from "../storage/repo";
 import { safeName } from "./fileName";
 import { readArchive, type ArchiveReadResult } from "../archive/reader";
 import { writeArchive } from "../archive/writer";
@@ -27,12 +27,14 @@ export async function exportProjectFile(
   const documents = await getDocuments(projectId);
   const assets = await listAssets(projectId);
   const sources = includeSources ? await listSources(projectId) : [];
+  const modules = await listModuleStates(projectId);
   const base = `${safeName(project.title)}${includeSources ? "" : "_공유용"}`;
   const files: { blob: Blob; fileName: string }[] = [];
   for await (const part of writeArchive(
     {
       project,
       documents,
+      modules: modules.map((m) => ({ moduleId: m.moduleId, stateVersion: m.stateVersion, updatedAt: m.updatedAt, payload: m.payload })),
       assets: assets.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, sha256: a.sha256, data: a.blob })),
       sources: sources.map((s) => ({
         id: s.id,
@@ -176,9 +178,15 @@ export async function importProjectFiles(files: Blob | Blob[]): Promise<ImportOu
       sourceUrl: m.sourceUrl,
     }));
 
+  // 기존 도구 상태: 알 수 없는 모듈·버전도 버리지 않고 그대로 보관한다(해당 모듈이 읽을 때 판단)
+  const modules = (Array.isArray(data.modules) ? data.modules : [])
+    .filter((m) => m && typeof m.moduleId === "string")
+    .map((m) => ({ projectId, moduleId: m.moduleId, stateVersion: Number(m.stateVersion) || 1, payload: m.payload, updatedAt: m.updatedAt || now }));
+
   const d = db();
-  await d.transaction("rw", [d.projects, d.documents, d.sources, d.assets], async () => {
+  await d.transaction("rw", [d.projects, d.documents, d.sources, d.assets, d.modules], async () => {
     await d.projects.add(project);
+    await d.modules.bulkPut(modules);
     await d.documents.bulkAdd(documents);
     await d.sources.bulkAdd(sources);
     await d.assets.bulkAdd(assets);

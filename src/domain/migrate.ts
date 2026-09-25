@@ -1,4 +1,5 @@
 import { defaultViewSettings, type DocumentData } from "./types";
+import { completeStyle } from "../renderers/band/style";
 
 /**
  * 저장된 문서를 현재 스키마로 맞춘다. 빠진 필드는 기본값으로 채우고 기존 값은 바꾸지 않는다.
@@ -6,7 +7,9 @@ import { defaultViewSettings, type DocumentData } from "./types";
  */
 export function normalizeDocument(doc: DocumentData): DocumentData {
   const def = defaultViewSettings();
-  const view = { ...def, ...doc.view, sizes: { ...def.sizes, ...doc.view?.sizes }, show: { ...def.show, ...doc.view?.show } };
+  const merged = { ...def, ...doc.view, sizes: { ...def.sizes, ...doc.view?.sizes }, show: { ...def.show, ...doc.view?.show } };
+  // 꾸미기 설정이 없는 예전 문서: 기존 글꼴·크기·테마를 옮겨 채운다(기존 값은 바꾸지 않음)
+  const view = { ...merged, style: completeStyle(doc.view?.style, { ...merged, width: doc.view?.width ?? 640 }), width: doc.view?.width ?? 640 };
   const entries: DocumentData["entries"] = {};
   let changed = JSON.stringify(view) !== JSON.stringify(doc.view);
   for (const [id, e] of Object.entries(doc.entries)) {

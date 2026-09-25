@@ -6,11 +6,15 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { DocumentData } from "../domain/types";
 import { BandView } from "../renderers/band/BandView";
+import { currentAppTheme, type AppThemeResolved } from "../renderers/band/style";
 import { safeName } from "./fileName";
 import { usedAssetIds } from "./html";
 
 export interface PngOptions {
   pixelRatio: 1 | 2;
+  /** png(기본) 또는 jpeg */
+  format?: "png" | "jpeg";
+  appTheme?: AppThemeResolved;
   /** 한 장의 최대 높이(CSS px) */
   maxPageHeight: number;
   onProgress?: (done: number, total: number) => void;
@@ -98,17 +102,20 @@ export async function exportDocumentPng(doc: DocumentData, getBlob: (id: string)
   }
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
-  const bg = doc.view.theme === "dark" ? "#1b1c1e" : "#ffffff";
-  Object.assign(host.style, { position: "fixed", left: "-100000px", top: "0", width: `${doc.view.width}px`, background: bg, pointerEvents: "none" });
+  Object.assign(host.style, { position: "fixed", left: "-100000px", top: "0", width: `${doc.view.width}px`, pointerEvents: "none" });
   document.body.appendChild(host);
   const root = createRoot(host);
   try {
-    flushSync(() => root.render(<BandView doc={doc} mode="export" assetUrl={(id) => urls.get(id)} />));
+    flushSync(() => root.render(<BandView doc={doc} mode="export" appTheme={opts.appTheme ?? currentAppTheme()} assetUrl={(id) => urls.get(id)} />));
     await document.fonts?.ready;
     await Promise.all(
       Array.from(host.querySelectorAll("img")).map((img) => (img.complete ? Promise.resolve() : img.decode().catch(() => undefined))),
     );
     const node = host.firstElementChild as HTMLElement;
+    // 배경은 기록 스킨의 글 표면색(편집기 화면 색이 아님)
+    const bg = getComputedStyle(node).backgroundColor || "#ffffff";
+    const fmt = opts.format ?? "png";
+    const ext = fmt === "jpeg" ? "jpg" : "png";
     const total = Math.ceil(node.getBoundingClientRect().height);
     const { entryCuts, lineCuts } = collectCuts(node);
     const plan = planPages(total, opts.maxPageHeight, entryCuts, lineCuts);
@@ -126,10 +133,10 @@ export async function exportDocumentPng(doc: DocumentData, getBlob: (id: string)
         skipFonts: true,
         style: { margin: "0", transform: `translateY(-${p.start}px)`, transformOrigin: "top left" },
       });
-      const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("이미지 생성 실패(캔버스 크기 제한일 수 있음)"))), "image/png"));
+      const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("이미지 생성 실패(캔버스 크기 제한일 수 있음)"))), `image/${fmt}`, 0.92));
       canvas.width = canvas.height = 0;
       const num = plan.length > 1 ? `_${String(i + 1).padStart(2, "0")}` : "";
-      pages.push({ fileName: `${base}${num}.png`, blob, height: h });
+      pages.push({ fileName: `${base}${num}.${ext}`, blob, height: h });
       opts.onProgress?.(i + 1, plan.length);
     }
     return { pages, forcedCuts: plan.filter((p) => p.forced).length };

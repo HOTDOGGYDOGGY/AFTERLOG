@@ -4,7 +4,7 @@ import { unzip } from "fflate";
 import { newId, nowIso } from "../domain/ids";
 import type { DocumentData, SourceImport, SourceKind } from "../domain/types";
 import { sha256Hex } from "../storage/hash";
-import { addAsset, addImport, guessMime, listSources } from "../storage/repo";
+import { getProject, addAsset, addImport, guessMime, listSources } from "../storage/repo";
 import { buildDocument } from "./band/build";
 import { BAND_HTML_PARSER_VERSION, parseBandHtml, type BandPageParseResult } from "./band/html";
 import { BAND_TEXT_PARSER_VERSION, looksLikeBandText, parseBandText, type LineInfo } from "./band/text";
@@ -233,6 +233,9 @@ export async function commitImport(projectId: string, pending: PendingImport, do
     .map((i) => pending.parse.documents[i])
     .filter(Boolean)
     .map((pd) => buildDocument(pd, { projectId, sourceId: source.id, parserVersion: pending.parserVersion, assetMap, sourceKind: pending.sourceKind }));
+  // 프로젝트 기본 디자인이 있으면 새 글에 복사(기존 글은 바꾸지 않음)
+  const defaultView = (await getProject(projectId))?.defaultView;
+  if (defaultView) for (const d of docs) d.view = { ...structuredClone(defaultView), show: { ...defaultView.show } };
   await addImport(projectId, source, docs);
   return docs.map((d) => ({ ...d, revision: 1 }));
 }

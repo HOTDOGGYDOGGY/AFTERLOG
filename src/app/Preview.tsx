@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as C from "../editor/commands";
 import { EditableText } from "../editor/EditableText";
 import { caret } from "../editor/ime";
@@ -7,6 +7,7 @@ import { findParent } from "../domain/validate";
 import { BandView, type BandEditHooks } from "../renderers/band/BandView";
 import { MenuButton, PopupMenu, type MenuItem } from "../components/Menu";
 import type { DocEditor } from "./useDocEditor";
+import { Icon } from "../components/Icon";
 
 interface Props {
   editor: DocEditor;
@@ -14,6 +15,7 @@ interface Props {
   selectedId: string | null;
   onSelect(id: string | null): void;
   onInsertImage(entryId: string): void;
+  appTheme: "light" | "dark";
 }
 
 const DRAG_TYPE = "application/x-afterlog-entry";
@@ -79,7 +81,29 @@ export function entryMenuItems(doc: DocumentData, entry: Entry, editor: DocEdito
   ];
 }
 
-export function Preview({ editor, assetUrl, selectedId, onSelect, onInsertImage }: Props) {
+/**
+ * 출력 폭과 화면 배율을 분리한다(V04): 공간이 충분하면 지정 폭(CSS px) 그대로, 좁으면 맞춤 배율로 줄이고 배율을 표시한다.
+ * 배율은 화면 표시일 뿐 출력 설정을 바꾸지 않는다.
+ */
+export function useFitScale(width: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const avail = el.clientWidth - 32;
+      setScale(avail > 0 && avail < width ? Math.max(0.4, avail / width) : 1);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [width]);
+  return { ref, scale };
+}
+
+export function Preview({ editor, assetUrl, selectedId, onSelect, onInsertImage, appTheme }: Props) {
   const { doc } = editor;
   const ro = !!editor.readOnly;
   const [ctx, setCtx] = useState<{ x: number; y: number; entryId: string } | null>(null);
@@ -127,10 +151,10 @@ export function Preview({ editor, assetUrl, selectedId, onSelect, onInsertImage 
               }}
               onDragEnd={() => setDrop(null)}
             >
-              ⠿
+              <Icon name="drag" size={16} />
             </span>
             <MenuButton label="항목 메뉴" items={() => entryMenuItems(doc, entry, editor, onInsertImage, onSelect)}>
-              ⋯
+              <Icon name="more" size={16} />
             </MenuButton>
           </span>
         ),
@@ -182,10 +206,16 @@ export function Preview({ editor, assetUrl, selectedId, onSelect, onInsertImage 
   );
 
   const ctxEntry = ctx ? doc.entries[ctx.entryId] : null;
+  const fit = useFitScale(doc.view.width);
   return (
-    <div className="preview-scroll" onClick={() => onSelect(null)}>
-      <div className="preview-page">
-        <BandView doc={doc} mode="edit" assetUrl={assetUrl} edit={hooks} />
+    <div className="preview-scroll" ref={fit.ref} onClick={() => onSelect(null)}>
+      {fit.scale < 1 ? (
+        <p className="fit-note small muted" role="status">
+          화면에 맞춰 {Math.round(fit.scale * 100)}%로 보는 중 · 출력 폭 {doc.view.width}px는 그대로
+        </p>
+      ) : null}
+      <div className="preview-page" style={{ width: doc.view.width, zoom: fit.scale < 1 ? fit.scale : undefined }}>
+        <BandView doc={doc} mode="edit" appTheme={appTheme} assetUrl={assetUrl} edit={hooks} />
       </div>
       {ctx && ctxEntry ? (
         <PopupMenu x={ctx.x} y={ctx.y} label="항목 메뉴" items={entryMenuItems(doc, ctxEntry, editor, onInsertImage, onSelect)} onClose={() => setCtx(null)} />

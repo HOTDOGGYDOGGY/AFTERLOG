@@ -123,7 +123,7 @@ export async function* writeArchive(input: ArchiveInput, opts: { maxPartBytes?: 
   const indexHash = await sha256Hex(strToU8(JSON.stringify({ assets, sources })));
   const setId = crypto.randomUUID();
   const snapshotId = crypto.randomUUID();
-  const projectJson = strToU8(JSON.stringify({ project: input.project, documents: input.documents } satisfies ProjectJson));
+  const projectJson = strToU8(JSON.stringify({ project: input.project, documents: input.documents, ...(input.modules?.length ? { modules: input.modules } : {}) } satisfies ProjectJson));
   const captureFiles: Record<string, Uint8Array> = {};
   const capture: Manifest["capture"] = {};
   if (input.capture?.report !== undefined) {

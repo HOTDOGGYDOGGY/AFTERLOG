@@ -1,23 +1,28 @@
-/* 밴드형 출력 스킨. 편집기 UI와 분리되어 있으며 HTML 내보내기에 그대로 포함된다. */
+/* 밴드 기록 스킨. 편집기 UI와 분리되어 있으며 HTML 내보내기에 그대로 포함된다.
+   기본(al-skin-band)은 실제 밴드 글 상세의 배치를 따른다: 600px 상세, 조밀한 댓글 행, 이름 옆 소개, 아래 메타, 들여쓴 답글.
+   다크는 형태·위치를 유지하고 색 토큰만 바꾼다(invert 필터 금지). */
 .al-band {
-  --al-bg: #ffffff;
+  --al-page: #f0f1f3;
   --al-card: #ffffff;
+  --al-soft: #fafafa;
   --al-text: #222222;
   --al-sub: #8a8a8a;
-  --al-line: #ececec;
-  --al-soft: #f6f6f6;
-  --al-mention: #1e9e5a;
-  --al-accent: #20c05c;
+  --al-line: #ebebeb;
+  --al-mention: #2b56b5;
+  --al-accent: #1fb258;
+  --al-bubble: #f1f2f4;
+  --al-highlight: rgba(64, 132, 255, 0.14);
   box-sizing: border-box;
   width: 100%;
-  max-width: var(--al-width, 640px);
+  max-width: var(--al-width, 600px);
   margin: 0 auto;
-  background: var(--al-bg);
+  background: var(--al-card);
   color: var(--al-text);
   font-size: var(--al-size-base, 14px);
-  line-height: 1.6;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
+  text-align: left;
 }
 .al-band *,
 .al-band *::before,
@@ -25,13 +30,17 @@
   box-sizing: border-box;
 }
 .al-band.al-theme-dark {
-  --al-bg: #1b1c1e;
-  --al-card: #232427;
-  --al-text: #e7e7e7;
-  --al-sub: #9a9ca1;
-  --al-line: #33353a;
-  --al-soft: #2b2d31;
-  --al-mention: #52d18b;
+  --al-page: #17191d;
+  --al-card: #23262b;
+  --al-soft: #1f2226;
+  --al-text: #dfe2e7;
+  --al-sub: #9aa1ab;
+  --al-line: #343840;
+  --al-mention: #86aefc;
+  --al-accent: #45c77a;
+  --al-bubble: #2e3238;
+  --al-highlight: rgba(120, 170, 255, 0.18);
+  color-scheme: dark;
 }
 
 .al-band p {
@@ -40,13 +49,26 @@
 .al-text {
   white-space: pre-wrap;
 }
+.al-band button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: inherit;
+}
+.al-spacer {
+  flex: 1;
+}
 
+/* ---------- 게시글 ---------- */
 .al-post {
   background: var(--al-card);
-  border-bottom: 1px solid var(--al-line);
 }
 .al-post-main {
-  padding: 18px 20px 0;
+  padding: 28px 40px 0;
 }
 .al-post-head {
   display: flex;
@@ -65,57 +87,132 @@
   min-width: 0;
 }
 .al-name {
-  font-size: var(--al-size-name, 15px);
-  font-weight: 700;
+  font-family: var(--al-font-name);
+  font-size: var(--al-size-name, 14px);
+  font-weight: var(--al-weight-name, 700);
 }
 .al-desc {
+  font-family: var(--al-font-desc);
   font-size: var(--al-size-desc, 12px);
   color: var(--al-sub);
 }
 .al-sub {
   display: flex;
-  gap: 8px;
-  font-size: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 6px;
+  font-family: var(--al-font-meta);
+  font-size: var(--al-size-meta, 12px);
   color: var(--al-sub);
 }
+.al-sub > * + *::before {
+  content: "·";
+  margin-right: 6px;
+}
 .al-post-body {
-  padding: 14px 0 16px;
+  padding: 20px 0 22px;
+  font-family: var(--al-font-body);
   font-size: var(--al-size-body, 15px);
+  line-height: var(--al-lh-body, 1.6);
+  letter-spacing: var(--al-ls-body, 0);
 }
 .al-counts {
   display: flex;
+  align-items: center;
   gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid var(--al-line);
+  padding: 0 0 14px;
   font-size: 13px;
   color: var(--al-sub);
 }
-
-.al-avatar {
-  flex: none;
+.al-reactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.al-action-strip {
+  display: flex;
+  border-top: 1px solid var(--al-line);
+  border-bottom: 1px solid var(--al-line);
+}
+.al-action-strip button {
+  flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  height: 44px;
+  font-size: 13px;
+  color: var(--al-text);
+}
+.al-action-strip button + button {
+  border-left: 1px solid var(--al-line);
+}
+.al-action-strip button:hover {
+  background: var(--al-soft);
+}
+.al-archive-status {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--al-sub);
+  text-align: center;
+  border-top: 1px solid var(--al-line);
+}
+
+/* ---------- 인장 ---------- */
+.al-avatar {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   border-radius: 50%;
-  object-fit: cover;
   background: var(--al-soft);
   color: var(--al-sub);
   font-weight: 700;
+  border: var(--al-av-border, 0);
+  line-height: 1;
+}
+.al-avatar.is-square {
+  border-radius: 0;
+}
+.al-avatar.is-rounded {
+  border-radius: var(--al-av-rounded, 10px);
+}
+.al-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center;
+}
+.al-avatar.is-contain img {
+  object-fit: contain;
+}
+.al-avatar-empty {
   border: 1px solid var(--al-line);
 }
+.al-avatar-shadow .al-avatar {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+.al-avatar-gap {
+  flex: none;
+}
 
+/* ---------- 댓글 (밴드 원형) ---------- */
 .al-comments {
-  padding: 4px 20px 12px;
   background: var(--al-soft);
-  border-top: 1px solid var(--al-line);
+  font-family: var(--al-font-comment);
+}
+.al-post > .al-comments {
+  padding: 0 0 4px;
 }
 .al-comment {
   display: flex;
   gap: 10px;
-  padding: 12px 0;
+  padding: 14px 40px 14px 22px;
 }
-.al-thread + .al-thread > .al-comment,
-.al-comments > .al-thread + .al-thread {
+.al-dividers .al-comments > .al-thread + .al-thread {
   border-top: 1px solid var(--al-line);
 }
 .al-comment-main {
@@ -124,23 +221,149 @@
 }
 .al-comment-body {
   font-size: var(--al-size-comment, 14px);
-  margin: 2px 0 4px;
+  line-height: var(--al-lh-comment, 1.55);
+  letter-spacing: var(--al-ls-comment, 0);
+  margin: 1px 0 3px;
 }
 .al-replies {
-  padding-left: 44px;
+  padding-left: var(--al-reply-indent, 44px);
 }
 .al-replies .al-comment {
-  padding: 8px 0;
-}
-.al-replies .al-thread + .al-thread > .al-comment {
-  border-top: 0;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 .al-mention {
   color: var(--al-mention);
   font-weight: 600;
-  margin-right: 2px;
+  margin-right: 3px;
+}
+.al-person-link {
+  cursor: pointer;
+}
+.al-name.al-person-link:hover {
+  text-decoration: underline;
+}
+.al-meta-link:hover {
+  text-decoration: underline;
+}
+.al-entry.is-highlight {
+  animation: al-flash 2.4s ease-out;
+}
+@keyframes al-flash {
+  0%,
+  45% {
+    background: var(--al-highlight);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
+/* ---------- 선형 목록 ---------- */
+.al-skin-linear .al-comments {
+  background: var(--al-card);
+}
+.al-skin-linear .al-comment .al-avatar,
+.al-skin-linear .al-comment .al-avatar-gap {
+  display: none;
+}
+.al-skin-linear .al-comment {
+  padding: 10px 40px;
+}
+.al-skin-linear .al-replies {
+  padding-left: 0;
+  margin-left: 40px;
+  border-left: 2px solid var(--al-line);
+}
+.al-skin-linear .al-replies .al-comment {
+  padding-left: 14px;
+}
+
+/* ---------- 카드형 ---------- */
+.al-skin-card .al-comments {
+  background: var(--al-card);
+  padding: 2px 16px 16px;
+}
+.al-skin-card .al-comments > .al-thread {
+  margin-top: 10px;
+  border: 1px solid var(--al-line);
+  border-radius: 8px;
+  background: var(--al-soft);
+}
+.al-skin-card.al-dividers .al-comments > .al-thread + .al-thread {
+  border-top: 1px solid var(--al-line);
+}
+.al-skin-card .al-comment {
+  padding: 12px 14px;
+}
+.al-skin-card .al-replies .al-thread {
+  border-top: 1px dashed var(--al-line);
+}
+
+/* ---------- 말풍선형(댓글을 대화로 바꾸지 않고 모양만) ---------- */
+.al-skin-bubble .al-comments {
+  background: var(--al-card);
+}
+.al-skin-bubble.al-dividers .al-comments > .al-thread + .al-thread {
+  border-top: 0;
+}
+.al-skin-bubble .al-comment {
+  padding: 8px 40px 8px 22px;
+}
+.al-skin-bubble .al-comment-body {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: 4px 0;
+  padding: 8px 12px;
+  border-radius: var(--al-bubble-radius, 14px);
+  background: var(--al-bubble);
+}
+.al-skin-bubble.al-tail-small .al-comment-body,
+.al-skin-bubble.al-tail-default .al-comment-body {
+  border-top-left-radius: 3px;
+}
+/* 꼬리: 말풍선과 같은 색의 삼각형을 겹쳐 붙여 틈·겹선이 생기지 않게 한다(테두리 없는 면 방식) */
+.al-skin-bubble.al-tail-small .al-comment-body::before,
+.al-skin-bubble.al-tail-default .al-comment-body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-top: 8px solid var(--al-bubble);
+  border-left: 7px solid transparent;
+}
+.al-skin-bubble.al-tail-default .al-comment-body::before {
+  left: -9px;
+  border-top-width: 12px;
+  border-left-width: 10px;
+}
+
+/* ---------- 읽기형 ---------- */
+.al-skin-reading .al-comments {
+  background: var(--al-card);
+}
+.al-skin-reading .al-comment .al-avatar,
+.al-skin-reading .al-comment .al-avatar-gap {
+  display: none;
+}
+.al-skin-reading .al-comment {
+  padding: 14px 44px;
+}
+.al-skin-reading .al-comment-body {
+  line-height: calc(var(--al-lh-comment, 1.55) + 0.25);
+  margin-top: 4px;
+}
+.al-skin-reading .al-replies {
+  padding-left: 0;
+}
+.al-skin-reading .al-replies .al-comment {
+  padding-left: 64px;
+}
+
+/* ---------- 이미지·기타 ---------- */
 .al-image {
   margin: 10px 0;
 }
@@ -149,6 +372,10 @@
   max-width: 100%;
   height: auto;
   border-radius: 4px;
+}
+.al-image-open {
+  display: block;
+  cursor: zoom-in;
 }
 .al-image-missing {
   margin: 10px 0;
@@ -179,7 +406,7 @@
 
 .al-mc-card {
   display: block;
-  padding: 16px 20px;
+  padding: 16px 22px;
   background: var(--al-card);
   border-bottom: 1px solid var(--al-line);
 }
@@ -201,14 +428,24 @@
   font-weight: 700;
 }
 
-@media (max-width: 480px) {
-  .al-post-main,
-  .al-comments,
+@media (max-width: 520px) {
+  .al-post-main {
+    padding: 20px 16px 0;
+  }
+  .al-comment {
+    padding-left: 14px;
+    padding-right: 16px;
+  }
+  .al-replies {
+    padding-left: min(var(--al-reply-indent, 44px), 16px);
+  }
   .al-mc-card {
     padding-left: 14px;
     padding-right: 14px;
   }
-  .al-replies {
-    padding-left: 24px;
+  .al-skin-linear .al-replies,
+  .al-skin-reading .al-replies .al-comment {
+    margin-left: 16px;
+    padding-left: 12px;
   }
 }

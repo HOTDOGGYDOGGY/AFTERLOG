@@ -8,6 +8,8 @@ export interface MenuItem {
   danger?: boolean;
   separator?: boolean;
   hint?: string;
+  /** 선택형 항목(테마 등): 체크 표시와 aria-checked */
+  checked?: boolean;
 }
 
 /** 화면 좌표에 뜨는 메뉴. 키보드(↑↓ Enter Esc)로 조작 가능 */
@@ -51,8 +53,9 @@ export function PopupMenu({ x, y, items, onClose, label }: { x: number; y: numbe
           <button
             key={i}
             type="button"
-            role="menuitem"
-            className={it.danger ? "is-danger" : undefined}
+            role={it.checked !== undefined ? "menuitemradio" : "menuitem"}
+            aria-checked={it.checked}
+            className={[it.danger ? "is-danger" : "", it.checked ? "is-checked" : ""].filter(Boolean).join(" ") || undefined}
             disabled={it.disabled}
             onClick={() => {
               onClose();
@@ -69,26 +72,54 @@ export function PopupMenu({ x, y, items, onClose, label }: { x: number; y: numbe
   );
 }
 
-export function MenuButton({ items, label, children, className }: { items: () => MenuItem[]; label: string; children: ReactNode; className?: string }) {
+export function MenuButton({
+  items,
+  label,
+  children,
+  className,
+  title,
+  align = "left",
+}: {
+  items: () => MenuItem[];
+  label: string;
+  children: ReactNode;
+  className?: string;
+  title?: string;
+  align?: "left" | "right";
+}) {
   const [open, setOpen] = useState<{ x: number; y: number } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
   return (
     <>
       <button
+        ref={btn}
         type="button"
         className={className ?? "ui-icon-btn"}
         aria-label={label}
-        title={label}
+        title={title ?? label}
         aria-haspopup="menu"
         aria-expanded={!!open}
         onClick={(e) => {
           e.stopPropagation();
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          setOpen({ x: r.left, y: r.bottom + 4 });
+          setOpen({ x: align === "right" ? r.right - 220 : r.left, y: r.bottom + 4 });
         }}
       >
         {children}
       </button>
-      {open ? <PopupMenu x={open.x} y={open.y} items={items()} label={label} onClose={() => setOpen(null)} /> : null}
+      {open ? (
+        <PopupMenu
+          x={open.x}
+          y={open.y}
+          items={items()}
+          label={label}
+          onClose={() => {
+            setOpen(null);
+            // 닫으면 연 버튼으로 포커스를 돌려준다
+            btn.current?.focus({ preventScroll: true });
+          }}
+        />
+      ) : null}
     </>
   );
 }

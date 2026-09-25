@@ -36,11 +36,15 @@ export function ImportPanel({
   projectId,
   onImported,
   compact,
+  variant,
 }: {
   projectId: string | null;
   onImported(projectId: string, docs: DocumentData[]): void;
   compact?: boolean;
+  /** start: 처음 화면(파일 열기·붙여넣기 두 동작만 주요 버튼) */
+  variant?: "start";
 }) {
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [selected, setSelected] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +178,65 @@ export function ImportPanel({
     );
   }
 
+  if (variant === "start") {
+    return (
+      <div
+        className={`import-start${over ? " is-over" : ""}`}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          void analyze(Array.from(e.dataTransfer.files));
+        }}
+      >
+        <div className="import-start-actions">
+          <button type="button" className="ui-btn ui-btn-primary ui-btn-large" disabled={busy} onClick={async () => analyze(await pickFiles(".html,.htm,.zip,.txt,image/*"))}>
+            {busy ? "분석 중…" : "파일 열기"}
+          </button>
+          <button type="button" className="ui-btn ui-btn-large" aria-expanded={pasteOpen} onClick={() => setPasteOpen(!pasteOpen)}>
+            텍스트 붙여넣기
+          </button>
+        </div>
+        <p className="small muted">밴드 저장 페이지(.html + _files 폴더 또는 .zip) · 게시글 HTML·텍스트 복사(.txt) · 여기로 끌어다 놓아도 됩니다. 파일은 이 브라우저 안에서만 처리됩니다.</p>
+        {pasteOpen ? (
+          <div className="paste-box">
+            <label className="field">
+              <span>게시글 영역 HTML 또는 화면에서 복사한 글</span>
+              <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={6} autoFocus />
+            </label>
+            <button type="button" className="ui-btn ui-btn-primary" disabled={busy || !paste.trim()} onClick={() => analyze([], paste)}>
+              분석
+            </button>
+          </div>
+        ) : null}
+        {error ? <p className="notice error">{error}</p> : null}
+        <details className="collector-box">
+          <summary>글이 많다면: 수집 확장프로그램(크롬·PC)</summary>
+          <p className="small">
+            밴드에 로그인한 크롬에서 글 하나·여러 글·글 목록을 한 번에 모아 <b>.afterlog</b> 파일로 저장합니다. 그 파일은 상단 프로젝트 이름 → '파일 열기'로 엽니다.
+          </p>
+          <ol className="small">
+            <li>
+              <a href="./afterlog-collector.zip" download>
+                수집 확장 받기 (afterlog-collector.zip)
+              </a>{" "}
+              → 압축 풀기
+            </li>
+            <li>크롬 주소창에 chrome://extensions → 오른쪽 위 '개발자 모드' 켜기</li>
+            <li>'압축해제된 확장 프로그램 로드' → 압축을 푼 폴더 선택</li>
+            <li>밴드 글이나 글 목록을 열고 확장 아이콘(A) → '이 글 저장' 또는 '이 목록의 글 모두 저장'</li>
+          </ol>
+          <p className="small muted">실제 밴드 화면에서의 동작은 아직 검증 전입니다. 문제가 생기면 수집 관리의 '문제 진단' 파일(본문·이름·주소 없음)을 전달해 주세요.</p>
+        </details>
+      </div>
+    );
+  }
+
   return (
     <div className={`import-panel${compact ? " is-compact" : ""}`}>
       <div
@@ -240,7 +303,7 @@ export function ImportPanel({
           <li>멤버 댓글 모음(저장 페이지 뒤쪽 목록): 지원, 전체 목록인지는 확인 필요</li>
           <li>여러 글·글 목록 한꺼번에: 수집 확장프로그램으로 지원(가짜 밴드 화면에서 검증, 실제 밴드 미검증)</li>
           <li>프로필·스토리·표정 종류/반응자·인물별 댓글 목록·밴드 채팅: 아직 지원하지 않음 (실제 샘플 필요)</li>
-          <li>카카오톡·네이버카페·트위터: 이후 단계</li>
+          <li>카카오톡·네이버카페·트위터·DM: 위쪽 플랫폼 줄에서 기존 도구로 사용</li>
         </ul>
       </details>
     </div>

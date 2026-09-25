@@ -2,6 +2,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { DocumentData } from "../domain/types";
 import { BandView } from "../renderers/band/BandView";
+import { currentAppTheme, pageBackground, resolveDocTheme, type AppThemeResolved } from "../renderers/band/style";
 import bandCss from "../renderers/band/band.css?raw";
 
 export function escapeHtml(s: string): string {
@@ -28,9 +29,15 @@ export function usedAssetIds(doc: DocumentData): Set<string> {
   return ids;
 }
 
-export function renderDocumentHtml(doc: DocumentData, dataUrls: Map<string, string>): string {
-  const body = renderToStaticMarkup(<BandView doc={doc} mode="export" assetUrl={(id) => dataUrls.get(id)} />);
-  const bg = doc.view.theme === "dark" ? "#1b1c1e" : "#f0f0f0";
+/** 기록 본문만(HTML 복사용). 기록 테마가 '앱과 연결'이면 지금 화면 테마로 확정한다 */
+export function renderDocumentBody(doc: DocumentData, dataUrls: Map<string, string>, appTheme: AppThemeResolved = currentAppTheme()): string {
+  return renderToStaticMarkup(<BandView doc={doc} mode="export" appTheme={appTheme} assetUrl={(id) => dataUrls.get(id)} />);
+}
+
+export function renderDocumentHtml(doc: DocumentData, dataUrls: Map<string, string>, appTheme: AppThemeResolved = currentAppTheme()): string {
+  const body = renderDocumentBody(doc, dataUrls, appTheme);
+  // 바깥 면은 기록 설정의 색. 편집기 앱 바탕색과 섞지 않는다
+  const bg = pageBackground(doc.view, resolveDocTheme(doc.view, appTheme));
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -52,11 +59,20 @@ ${body}
 `;
 }
 
-export async function exportDocumentHtml(doc: DocumentData, getBlob: (id: string) => Promise<Blob | undefined>): Promise<Blob> {
+async function dataUrlsFor(doc: DocumentData, getBlob: (id: string) => Promise<Blob | undefined>) {
   const urls = new Map<string, string>();
   for (const id of usedAssetIds(doc)) {
     const b = await getBlob(id);
     if (b) urls.set(id, await blobToDataUrl(b));
   }
-  return new Blob([renderDocumentHtml(doc, urls)], { type: "text/html;charset=utf-8" });
+  return urls;
+}
+
+export async function exportDocumentHtml(doc: DocumentData, getBlob: (id: string) => Promise<Blob | undefined>, appTheme?: AppThemeResolved): Promise<Blob> {
+  return new Blob([renderDocumentHtml(doc, await dataUrlsFor(doc, getBlob), appTheme)], { type: "text/html;charset=utf-8" });
+}
+
+/** HTML 복사: 스타일을 포함한 조각(붙여넣을 곳에서 그대로 보이도록 style 태그 동봉) */
+export async function documentHtmlSnippet(doc: DocumentData, getBlob: (id: string) => Promise<Blob | undefined>, appTheme?: AppThemeResolved): Promise<string> {
+  return `<style>${bandCss}</style>\n${renderDocumentBody(doc, await dataUrlsFor(doc, getBlob), appTheme)}`;
 }

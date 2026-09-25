@@ -56,9 +56,19 @@ export interface Manifest {
   capture?: { report?: string; jobs?: string };
 }
 
+/** 기존 도구·원문 보관 모듈의 상태(버전이 붙은 레거시 자료). 실행 코드는 넣지 않고 앱에 번들된 모듈이 읽는다 */
+export interface ProjectModuleJson {
+  moduleId: string;
+  stateVersion: number;
+  updatedAt: string;
+  payload: unknown;
+}
+
 export interface ProjectJson {
   project: Project;
   documents: DocumentData[];
+  /** 기존 도구(카톡·카페·트위터·DM)·원문 보관(짓시) 상태. 없는 예전 파일도 그대로 읽힌다 */
+  modules?: ProjectModuleJson[];
 }
 
 export class ProjectFileError extends Error {

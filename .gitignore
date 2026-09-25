@@ -5,3 +5,4 @@ playwright-report/
 tests/private/
 dist-collector/
 dist-collector-test/
+scratch-*.mjs
