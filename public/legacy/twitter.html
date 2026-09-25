@@ -3,13 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>😇 RPBackupAssistant - 트위터</title>
+<title>트위터 · AFTERLOG 기존 편집기</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./twitter.css">
+<link rel="stylesheet" href="./twitter/twitter.css">
+<link rel="stylesheet" href="./legacy-embed.css">
 </head>
-<body>
+<body class="afterlog-embed">
+<!-- AFTERLOG: 원래 스크립트가 찾는 버튼을 숨긴 채 둔다(원본에서 #helpBtn이 빠져 내보내기·초기화 등록이 멈추던 문제). -->
+<div hidden aria-hidden="true">
+  <button id="helpBtn" type="button" tabindex="-1"></button>
+  <button id="copyHtml" type="button" tabindex="-1"></button>
+  <button id="exportHtml" type="button" tabindex="-1"></button>
+  <button id="exportPng" type="button" tabindex="-1"></button>
+  <button id="resetAll" type="button" tabindex="-1"></button>
+</div>
 
 <main class="container" id="mainContainer">
     <div class="left-panel" id="leftPanel">
@@ -133,6 +142,7 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="./twitter.js"></script>
+<script src="./twitter/twitter.js"></script>
+<script src="./bridge.js"></script>
 </body>
 </html>

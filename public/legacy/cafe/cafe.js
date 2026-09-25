@@ -1,3 +1,8 @@
+/* AFTERLOG 연결판(원본: rpbackup/cafe.js). 바꾼 곳은 "AFTERLOG:" 주석으로 표시했다.
+   - 예시 글을 자동으로 넣지 않음(끝에 있던 예시 채우기 블록 제거)
+   - html2canvas를 CDN이 아니라 앱에 번들된 파일에서 읽음
+   - 끝에 window.__rpbaModule 등록(상태 저장·복원·실행취소·내보내기)
+*/
 (function() {
     'use strict';
 
@@ -1507,7 +1512,7 @@
         previewContent.querySelectorAll('.rp-controls').forEach(el => el.style.display = 'none');
         
         const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        script.src = './vendor/html2canvas.min.js'; // AFTERLOG: CDN 대신 앱에 번들된 파일
         script.onload = function() {
             let bgColor;
             if (currentSkin === 'navercafe') {
@@ -1565,45 +1570,106 @@
     document.getElementById('exportPng').addEventListener('click', () => exportImage('png'));
     document.getElementById('exportJpg').addEventListener('click', () => exportImage('jpg'));
     
-})();
 
-// v6: 기본 예시를 placeholder가 아닌 실제 텍스트로 넣습니다.
-(function(){
-  const EXAMPLE = `작성자 정보
-	예시 A
-작성일시2026.01.18. 12:35
-안녕하세요.
-댓글 정보
-^댓글 2	
-등록순
-프로필
-예시 B
-2026.01.18. 12:44답글
-반갑습니다~ (인사한다)
-프로필
-예시 A작성자
-2026.01.18. 12:59답글
-(사망한다)
-프로필
-예시 B
-2026.01.18. 12:57답글
-어째서?! (놀란다)
-`;
-  function ensureExample(){
-    const ta = document.getElementById('inputArea');
-    if (!ta) return;
-    const v = (ta.value || '').trim();
-    if (!v){
-      ta.value = EXAMPLE;
+    // ===== AFTERLOG: 연결 등록 =====
+    function cleanPreviewHtml(dropButtons) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = previewContent.innerHTML;
+        tempDiv.querySelectorAll('.rp-controls, .delete-btn, .toggle-reply-btn, .rp-ctrl-btn, .msg-controls' + (dropButtons ? ', button' : '')).forEach(el => el.remove());
+        tempDiv.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+        return tempDiv.innerHTML;
     }
-    // 초기 미리보기 렌더링
-    setTimeout(() => {
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-    }, 100);
-  }
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ensureExample, {once:true});
-  } else {
-    setTimeout(ensureExample, 50);
-  }
+    function skinClassName() {
+        let skinClass = 'skin-' + currentSkin;
+        if (skinTheme === 'light') skinClass += ' skin-light';
+        return skinClass + ' font-' + mainFont + ' action-font-' + actionFont + ' action-style-' + actionStyle;
+    }
+    function syncControls() {
+        document.querySelectorAll('.skin-btn').forEach(b => b.classList.toggle('active', b.dataset.skin === currentSkin));
+        document.querySelectorAll('.skin-theme-btn').forEach(b => b.classList.toggle('active', b.dataset.skinTheme === skinTheme));
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set('mainFontSelect', mainFont);
+        set('actionFontSelect', actionFont);
+        set('actionStyleSelect', actionStyle);
+        set('actionColorPicker', actionColor);
+        set('timestampSelect', timestampMode);
+        document.querySelectorAll('.toggle-switch').forEach(t => {
+            const k = t.dataset.setting;
+            if (k in settings) t.classList.toggle('active', !!settings[k]);
+        });
+        const actionGroup = document.getElementById('actionSettingsGroup');
+        if (actionGroup) actionGroup.style.display = settings.showActions ? '' : 'none';
+        updateFontSizeUI();
+    }
+    const CAFE_DEFAULTS = JSON.parse(JSON.stringify({ currentSkin, skinTheme, mainFont, actionFont, actionColor, actionStyle, timestampMode, fontSizesBySkin, lineHeightContent, lineHeightPost, settings }));
+    window.__rpbaModule = {
+        stateVersion: 1,
+        fileBase: 'navercafe',
+        capabilities: { undo: true, export: ['html', 'png', 'copy'], importText: true },
+        watchRoot: () => document.getElementById('mainContainer'),
+        snapshot() {
+            return JSON.parse(JSON.stringify({
+                text: inputArea.value,
+                characters, mainPost, parsedMessages,
+                currentSkin, skinTheme, mainFont, actionFont, actionColor, actionStyle, timestampMode,
+                fontSizesBySkin, lineHeightContent, lineHeightPost, settings
+            }));
+        },
+        load(st) {
+            const s = st || CAFE_DEFAULTS;
+            inputArea.value = st ? (st.text || '') : '';
+            characters = st && st.characters ? st.characters : {};
+            mainPost = st ? (st.mainPost || null) : null;
+            parsedMessages = st && Array.isArray(st.parsedMessages) ? st.parsedMessages : [];
+            currentSkin = s.currentSkin || CAFE_DEFAULTS.currentSkin;
+            skinTheme = s.skinTheme || CAFE_DEFAULTS.skinTheme;
+            mainFont = s.mainFont || CAFE_DEFAULTS.mainFont;
+            actionFont = s.actionFont || CAFE_DEFAULTS.actionFont;
+            actionColor = s.actionColor || CAFE_DEFAULTS.actionColor;
+            actionStyle = s.actionStyle || CAFE_DEFAULTS.actionStyle;
+            timestampMode = s.timestampMode || CAFE_DEFAULTS.timestampMode;
+            for (const k of Object.keys(fontSizesBySkin)) Object.assign(fontSizesBySkin[k], CAFE_DEFAULTS.fontSizesBySkin[k], (s.fontSizesBySkin || {})[k] || {});
+            lineHeightContent = s.lineHeightContent || CAFE_DEFAULTS.lineHeightContent;
+            lineHeightPost = s.lineHeightPost || CAFE_DEFAULTS.lineHeightPost;
+            Object.assign(settings, CAFE_DEFAULTS.settings, s.settings || {});
+            undoStack = [];
+            redoStack = [];
+            updateUndoRedoButtons();
+            syncControls();
+            renderCharacterList();
+            renderPreview();
+        },
+        undo: () => undo(),
+        redo: () => redo(),
+        importText(t) {
+            inputArea.value = t;
+            inputArea.dispatchEvent(new Event('input'));
+        },
+        exportHtml() {
+            return '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>RP 백업 · 네이버 카페</title>' +
+                '<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Gothic:wght@400;700&family=Gothic+A1:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;700&display=swap" rel="stylesheet">' +
+                '<style>' + collectStyles() + '</style></head><body>' +
+                '<div class="preview-content ' + skinClassName() + '" style="max-width:750px;margin:20px auto;padding:20px;">' + cleanPreviewHtml(true) + '</div></body></html>';
+        },
+        copyHtml: () => cleanPreviewHtml(false),
+        pngTarget() {
+            previewContent.querySelectorAll('.rp-controls').forEach(el => el.style.display = 'none');
+            let bg;
+            if (currentSkin === 'navercafe') bg = skinTheme === 'light' ? '#ffffff' : '#070707';
+            else if (currentSkin === 'default') bg = skinTheme === 'light' ? '#ffffff' : '#1a1a1f';
+            else bg = skinTheme === 'light' ? '#f5f5f5' : '#1a1a1f';
+            return { el: previewContent, bg, cleanup: () => previewContent.querySelectorAll('.rp-controls').forEach(el => el.style.display = '') };
+        }
+    };
+    function collectStyles() {
+        let styles = '';
+        for (const sheet of document.styleSheets) {
+            try {
+                for (const rule of sheet.cssRules) {
+                    if (rule.cssText && !rule.cssText.includes(':hover') && !rule.cssText.includes('.rp-controls') && !rule.cssText.includes('.rp-ctrl-btn')) styles += rule.cssText + '\n';
+                }
+            } catch (e) { /* 다른 출처 스타일(글꼴)은 읽을 수 없어 건너뜀 */ }
+        }
+        return styles;
+    }
 })();

@@ -1,0 +1,10 @@
+/* AFTERLOG 안에 넣을 때만 쓰는 최소 보정. 원래 도구의 디자인은 바꾸지 않는다(명세 v1.2 15.2).
+   - 상단 막대는 통합 셸이 담당하므로 높이 0
+   - PC 전용 차단 화면은 쓰지 않는다(새 셸은 좁은 화면을 막지 않음) */
+body.afterlog-embed {
+  --topbar-h: 0px;
+  margin: 0;
+}
+.afterlog-embed .mobile-blocker {
+  display: none !important;
+}

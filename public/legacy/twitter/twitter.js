@@ -1,3 +1,10 @@
+/* AFTERLOG 연결판(원본: rpbackup/twitter.js). 바꾼 곳은 "AFTERLOG:" 주석으로 표시했다.
+   - 주소의 mode=dm 이면 DM 전용(트위터 DM만), mode=twitter 이면 타임라인·멘션 타래 전용. 같은 모듈이지만 상태는 따로 저장된다
+   - 원문을 고치거나 형식을 바꿔도 이미 올린 프로필 사진·인증 표시를 이어받음
+   - 부모 창에 postMessage('*')를 보내던 플랫폼 버튼 코드 제거(통합 셸이 전환을 담당)
+   - html2canvas를 CDN이 아니라 앱에 번들된 파일에서 읽음
+   - 끝에 window.__rpbaModule 등록
+*/
 // Twitter Backup JS
 (function() {
     'use strict';
@@ -14,6 +21,24 @@
     let characters = {};
     let parsedMessages = [];
     let mainTweet = null;
+
+    // AFTERLOG: DM 탭과 트위터 탭을 나눈다
+    const FORCED_MODE = new URLSearchParams(location.search).get('mode'); // 'dm' | 'twitter' | null
+    if (FORCED_MODE === 'twitter') currentType = 'timeline';
+    function pickType(detected) {
+        if (FORCED_MODE === 'dm') return 'dm';
+        if (FORCED_MODE === 'twitter' && detected === 'dm') return currentType === 'dm' ? 'timeline' : currentType;
+        return detected;
+    }
+    // AFTERLOG: 다시 해석해도 인물의 사진·인증 표시는 이어받는다
+    function carryCharacters(prev) {
+        Object.keys(characters).forEach(k => {
+            const o = prev[k];
+            if (!o) return;
+            if (o.avatar) characters[k].avatar = o.avatar;
+            if (o.verified) characters[k].verified = o.verified;
+        });
+    }
     
     // DOM Elements
     const inputArea = document.getElementById('inputArea');
@@ -623,7 +648,7 @@
         }
         
         // 타입 감지
-        const detected = detectType(text);
+        const detected = pickType(detectType(text));
         currentType = detected;
         typeValue.textContent = detected === 'dm' ? 'DM' : detected === 'timeline' ? '타임라인' : '멘션 타래';
         
@@ -633,6 +658,7 @@
         });
         
         // 파싱
+        const prevChars = characters;
         characters = {};
         mainTweet = null;
         
@@ -643,6 +669,7 @@
         } else {
             parsedMessages = parseThread(text);
         }
+        carryCharacters(prevChars);
         
         renderCharacterList();
         renderPreview();
@@ -669,6 +696,7 @@
             // 재파싱
             const text = inputArea.value.trim();
             if (text) {
+                const prevChars = characters;
                 characters = {};
                 mainTweet = null;
                 if (currentType === 'dm') {
@@ -678,6 +706,7 @@
                 } else {
                     parsedMessages = parseThread(text);
                 }
+                carryCharacters(prevChars);
                 renderCharacterList();
             }
             
@@ -853,7 +882,7 @@
     
     document.getElementById('exportPng').addEventListener('click', function() {
         const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        script.src = './vendor/html2canvas.min.js'; // AFTERLOG: CDN 대신 번들 파일
         script.onload = function() {
             html2canvas(previewContent, {
                 backgroundColor: currentTheme === 'light' ? '#fff' : currentTheme === 'dim' ? '#15202b' : '#000',
@@ -886,17 +915,7 @@
         }
     });
     
-    // 플랫폼 버튼 (페이지 이동)
-    document.querySelectorAll('.platform-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const platform = this.dataset.platform;
-            if (platform === 'kakao') {
-                window.parent.postMessage({ type: 'switchPlatform', platform: 'kakao' }, '*');
-            } else if (platform === 'cafe') {
-                window.parent.postMessage({ type: 'switchPlatform', platform: 'cafe' }, '*');
-            }
-        });
-    });
+    // AFTERLOG: 플랫폼 버튼(부모 창에 postMessage('*')) 제거 — 통합 셸이 전환을 담당
     
     // 리사이저
     const resizer = document.getElementById('resizer');
@@ -924,4 +943,76 @@
         document.body.style.userSelect = '';
     });
     
+
+    // ===== AFTERLOG: 연결 등록 =====
+    const TYPE_LABEL = { dm: 'DM', timeline: '타임라인', thread: '멘션 타래' };
+    // 탭에 맞는 형식 버튼만 보인다
+    document.querySelectorAll('.type-btn').forEach(btn => {
+        const t = btn.dataset.type;
+        if ((FORCED_MODE === 'dm' && t !== 'dm') || (FORCED_MODE === 'twitter' && t === 'dm')) btn.hidden = true;
+        btn.classList.toggle('active', t === currentType);
+    });
+    function syncControls() {
+        document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === currentType));
+        document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === currentTheme));
+        typeValue.textContent = inputArea.value.trim() ? TYPE_LABEL[currentType] : '-';
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        set('fontSizeAll', fontSize); set('fontSizeAllInput', fontSize);
+        set('fontSizeContent', fontSize); set('fontSizeContentInput', fontSize);
+        set('fontSizeName', fontSizeName); set('fontSizeNameInput', fontSizeName);
+        document.querySelectorAll('.toggle-switch').forEach(t => {
+            const k = t.dataset.setting;
+            if (k in settings) t.classList.toggle('active', !!settings[k]);
+        });
+    }
+    function cleanPreview() {
+        const clone = previewContent.cloneNode(true);
+        clone.querySelectorAll('button, input').forEach(el => el.remove());
+        clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+        return clone;
+    }
+    window.__rpbaModule = {
+        stateVersion: 1,
+        fileBase: FORCED_MODE === 'dm' ? 'twitter-dm' : 'twitter',
+        capabilities: { undo: false, export: ['html', 'png', 'copy'], importText: true },
+        watchRoot: () => document.getElementById('mainContainer'),
+        snapshot() {
+            return JSON.parse(JSON.stringify({ text: inputArea.value, currentType, currentTheme, fontSize, fontSizeName, settings, characters, parsedMessages, mainTweet }));
+        },
+        load(st) {
+            inputArea.value = st ? (st.text || '') : '';
+            currentType = pickType(st && st.currentType ? st.currentType : (FORCED_MODE === 'twitter' ? 'timeline' : 'dm'));
+            currentTheme = (st && st.currentTheme) || 'light';
+            fontSize = (st && st.fontSize) || 15;
+            fontSizeName = (st && st.fontSizeName) || 15;
+            settings = Object.assign({ showTime: true }, (st && st.settings) || {});
+            characters = (st && st.characters) || {};
+            parsedMessages = (st && Array.isArray(st.parsedMessages)) ? st.parsedMessages : [];
+            mainTweet = (st && st.mainTweet) || null;
+            syncControls();
+            renderCharacterList();
+            renderPreview();
+        },
+        importText(t) {
+            inputArea.value = t;
+            inputArea.dispatchEvent(new Event('input'));
+        },
+        exportHtml() {
+            let css = '';
+            for (const sheet of document.styleSheets) {
+                try {
+                    for (const rule of sheet.cssRules) if (rule.cssText && !rule.cssText.includes(':hover')) css += rule.cssText + '\n';
+                } catch (e) { /* 다른 출처 스타일은 건너뜀 */ }
+            }
+            const bg = currentTheme === 'light' ? '#e8ebee' : currentTheme === 'dim' ? '#0d141c' : '#000';
+            return '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>' + (FORCED_MODE === 'dm' ? '트위터 DM 백업' : '트위터 백업') + '</title>' +
+                '<style>' + css + '</style></head>' +
+                '<body style="background:' + bg + ';padding:20px;margin:0;">' +
+                '<div style="max-width:600px;margin:0 auto;">' + cleanPreview().outerHTML + '</div></body></html>';
+        },
+        copyHtml: () => cleanPreview().innerHTML,
+        pngTarget() {
+            return { el: previewContent, bg: currentTheme === 'light' ? '#fff' : currentTheme === 'dim' ? '#15202b' : '#000' };
+        }
+    };
 })();

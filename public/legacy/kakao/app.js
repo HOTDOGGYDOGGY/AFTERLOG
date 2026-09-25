@@ -1,3 +1,10 @@
+/* AFTERLOG 연결판(원본: rpbackup/app.js). 바꾼 곳은 "AFTERLOG:" 주석으로 표시했다.
+   - 예시 대화를 자동으로 넣지 않음(실제 프로젝트에 가짜 자료를 넣지 않는다)
+   - 인물·설정을 브라우저 localStorage가 아니라 AFTERLOG 프로젝트에 저장(bridge.js의 snapshot/load)
+   - 원문을 고쳐도 인물 설정(이름·사진·색)이 초기화되지 않게 이전 설정을 이어받음
+   - HTML 저장을 함수로 분리하고 편집 조작 요소를 뺀 결과를 돌려줌
+   - 끝에 window.__rpbaModule 등록
+*/
 /* RP 백업 - Stage3 Split: app.js
    추가/수정:
    - "설정" 패널: 탭을 인물/카톡으로
@@ -95,7 +102,8 @@
 [예시 A] [오전 1:23] 안녕하세요
 [예시 B] [오전 1:23] 반갑습니다
 [예시 C] [오전 1:24] 안녕안녕`;
-  if (!elInput.value.trim()) elInput.value = SAMPLE;
+  // AFTERLOG: 예시 대화는 넣지 않는다(입력칸 안내문으로 대신)
+  void SAMPLE;
 
   // ===== Utils =====
   function hashText(s){
@@ -253,6 +261,8 @@
     return "rpbackup_profiles_" + hashText(raw.trim());
   }
   function loadProfilesFromStorage(key){
+    // AFTERLOG: 인물은 프로젝트에 저장한다. 원문 해시별 localStorage는 쓰지 않는다(용량 초과·프로젝트 간 섞임 방지)
+    if (window.__rpbaNoLocalStorage !== false) return { people: {}, meId: "" };
     try{
       const j = localStorage.getItem(key);
       if (!j) return { people: {}, meId: "" };
@@ -266,6 +276,7 @@
     }
   }
   function saveProfilesToStorage(key, data){
+    if (window.__rpbaNoLocalStorage !== false) return { ok: true };
     try{
       localStorage.setItem(key, JSON.stringify(data));
       return { ok: true };
@@ -316,8 +327,14 @@
   function getProfileStateFor(raw){
     const key = storageKeyForInput(raw);
     if (session.key === key) return;
+    // AFTERLOG: 원문을 고쳐도 기존 인물 설정을 이어받는다
+    const prevData = session.data;
     session.key = key;
     session.data = loadProfilesFromStorage(key);
+    for (const [pid, person] of Object.entries((prevData && prevData.people) || {})){
+      if (!session.data.people[pid]) session.data.people[pid] = person;
+    }
+    if (!session.data.meId && prevData && prevData.meId) session.data.meId = prevData.meId;
     session.storageWritable = true;
     setStorageWarning(false);
   }
@@ -348,6 +365,8 @@
   let lastBgError = "";
 
   function loadKakaoSettings(){
+    // AFTERLOG: 설정은 프로젝트에서 불러온다(다른 프로젝트의 배경 이미지가 섞이지 않게)
+    if (window.__rpbaNoLocalStorage !== false) return;
     try{
       const j = localStorage.getItem(SETTINGS_KEY);
       if (!j) return;
@@ -357,6 +376,7 @@
     }catch(_e){ /* ignore */ }
   }
   function saveKakaoSettings(){
+    if (window.__rpbaNoLocalStorage !== false) return;
     try{
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(kakaoSettings));
     }catch(_e){
@@ -1489,7 +1509,15 @@
   });
 
   // ===== Save: HTML =====
-  btnSaveHtml.addEventListener("click", () => {
+  // AFTERLOG: 편집 조작 요소(메시지 버튼·빈 답장칸·편집 표시)를 뺀 미리보기 HTML
+  function cleanChatHtml(){
+    const clone = elChat.cloneNode(true);
+    clone.querySelectorAll(".msg-controls, .reply-box.placeholder, button, input").forEach(el => el.remove());
+    clone.querySelectorAll("[contenteditable]").forEach(el => el.removeAttribute("contenteditable"));
+    return clone.innerHTML;
+  }
+
+  function buildKakaoHtml(){
     // Save a standalone HTML snapshot (simple): embed current CSS variables + rendered chat as HTML.
     const title = "RP 백업 - 카카오톡";
     const bgColor = kakaoSettings.bgColor || "#b2c7da";
@@ -1525,11 +1553,13 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo"
 <body>
 <div class="wrap"><div class="card">
 <div class="hd">미리보기</div>
-<div class="chat">${elChat.innerHTML}</div>
+<div class="chat">${cleanChatHtml()}</div>
 </div></div>
 </body></html>`;
-
-    downloadBlob(`rpbackup_${Date.now()}.html`, new Blob([html], {type:"text/html;charset=utf-8"}));
+    return html;
+  }
+  btnSaveHtml.addEventListener("click", () => {
+    downloadBlob(`rpbackup_${Date.now()}.html`, new Blob([buildKakaoHtml()], {type:"text/html;charset=utf-8"}));
   });
 
   // ===== Save: PNG/JPG (DOM -> Image via SVG foreignObject) =====
@@ -1679,4 +1709,67 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo"
   // initial render - 바로 실행
   renderKakaoSettingsUI();
   renderAll();  // 예시 텍스트 바로 파싱 및 렌더링
+
+  // ===== AFTERLOG: 연결 등록 =====
+  const KAKAO_DEFAULTS = JSON.parse(JSON.stringify(kakaoSettings));
+  function refreshAll(){
+    renderAll();
+    renderKakaoSettingsUI();
+  }
+  window.__rpbaModule = {
+    stateVersion: 1,
+    fileBase: "kakaotalk",
+    capabilities: { undo: false, export: ["html", "png", "copy"], importText: true },
+    watchRoot: () => document.getElementById("app"),
+    snapshot(){
+      return {
+        text: elInput.value || "",
+        kakaoSettings: JSON.parse(JSON.stringify(kakaoSettings)),
+        people: JSON.parse(JSON.stringify(session.data)),
+        items: JSON.parse(JSON.stringify(currentState.items)),
+        lineCount: currentState.lineCount
+      };
+    },
+    load(st){
+      if (!st){
+        elInput.value = "";
+        kakaoSettings = Object.assign({}, KAKAO_DEFAULTS);
+        applyKakaoSettings();
+        session = { key: "", data: { people: {}, meId: "" }, storageWritable: true };
+        refreshAll();
+        return;
+      }
+      elInput.value = st.text || "";
+      kakaoSettings = Object.assign({}, KAKAO_DEFAULTS, st.kakaoSettings || {});
+      applyKakaoSettings();
+      session.key = storageKeyForInput(elInput.value);
+      session.data = st.people && st.people.people ? st.people : { people: {}, meId: "" };
+      renderAll();
+      // 미리보기에서 고친 말풍선·삭제·답장·사진은 원문을 다시 해석하지 않고 저장본대로
+      if (Array.isArray(st.items)){
+        currentState = { items: st.items, lineCount: st.lineCount || 0 };
+        renderChat(currentState.items);
+      }
+      renderKakaoSettingsUI();
+    },
+    importText(t){
+      elInput.value = t;
+      renderAll();
+    },
+    exportHtml: () => buildKakaoHtml(),
+    copyHtml: () => cleanChatHtml(),
+    pngTarget(){
+      // 스크롤 영역 전체를 그리도록 화면 밖에 같은 폭의 사본을 만든다(배경색·배경 이미지 포함)
+      const box = document.createElement("div");
+      const w = Math.max(360, elChat.clientWidth || 600);
+      const css = modeToCss(kakaoSettings.bgMode || "fill");
+      box.style.cssText = "position:fixed;left:-100000px;top:0;width:" + w + "px;padding:18px 16px;box-sizing:border-box;" +
+        "background-color:" + (kakaoSettings.bgColor || "#b2c7da") + ";" +
+        (kakaoSettings.bgImageDataUrl ? "background-image:url('" + kakaoSettings.bgImageDataUrl + "');background-size:" + css.size + ";background-repeat:" + css.repeat + ";background-position:" + css.position + ";" : "");
+      box.className = "panelBody";
+      box.innerHTML = cleanChatHtml();
+      document.getElementById("cardPreview").appendChild(box);
+      return { el: box, bg: kakaoSettings.bgColor || "#b2c7da", cleanup: () => box.remove() };
+    }
+  };
 })();

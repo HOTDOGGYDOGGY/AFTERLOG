@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>카카오톡 · AFTERLOG 기존 편집기</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./kakao/style.css" />
+  <link rel="stylesheet" href="./legacy-embed.css" />
+</head>
+<body class="afterlog-embed">
+  <!-- AFTERLOG: 상단 플랫폼 전환·저장 막대는 통합 셸이 담당한다(중복 제거).
+       원래 스크립트가 찾는 저장 버튼은 숨긴 채 남겨 초기화가 멈추지 않게 한다(원본의 btnSaveJpg 누락으로 초기화가 중단되던 문제). -->
+  <div hidden aria-hidden="true">
+    <button id="btnSaveHtml" type="button" tabindex="-1"></button>
+    <button id="btnSavePng" type="button" tabindex="-1"></button>
+    <button id="btnSaveJpg" type="button" tabindex="-1"></button>
+    <button id="btnLayoutA" type="button" tabindex="-1"></button>
+    <button id="btnLayoutB" type="button" tabindex="-1"></button>
+  </div>
+
+  <!-- App -->
+  <main class="app layout-a" id="app">
+
+    <!-- Left stack -->
+    <div class="leftStack" id="leftStack">
+      <section class="card" id="cardInput">
+        <div class="card__hd">
+          <div>
+            <div class="title">대화 붙여넣기</div>
+            <div class="sub">대화 내용을 붙여주시면 자동으로 반영됩니다.</div>
+          </div>
+          <span class="chip" id="statsChip">0명 · 0줄</span>
+        </div>
+
+        <textarea id="input" spellcheck="false" placeholder="카카오톡 대화 내보내기 텍스트를 붙여넣으세요.&#10;예) [이름] [오후 1:23] 메시지"></textarea>
+
+        <div class="actions">
+          <button class="btn" id="btnClear" type="button">입력 비우기</button>
+          <button class="btn" id="btnInsertSep" type="button" title="중간 구분선(날짜/텍스트)을 추가합니다">중간구분 추가</button>
+          <button class="btn" id="btnInsertReply" type="button" title="답장 마커를 추가합니다">답장 추가</button>
+          <span class="chip warn" id="storageChip" style="display:none;"></span>
+        </div>
+
+        <div class="hint">
+          같은 이름은 자동으로 같은 인물로 묶입니다. 인물별로 <b>프로필 사진</b>을 올리거나 <b>표시 이름</b>을 바꾸실 수 있습니다.<br>
+          <small>답장: 메시지 내용 앞에 <code>[[답장:원본내용]]</code> 형식으로 추가하세요.</small>
+        </div>
+      </section>
+
+      <!-- row resizer only used in layout-b -->
+      <div class="resizer row" id="rzBRow" title="드래그로 크기 조절"></div>
+
+      <section class="card" id="cardMid">
+        <div class="card__hd">
+          <div>
+            <div class="title">설정</div>
+            <div class="sub" id="midSub">인물 / 카톡 설정</div>
+          </div>
+          <div class="tabs">
+            <button class="tab active" id="tabPeople" type="button">인물</button>
+            <button class="tab" id="tabKakao" type="button">카톡</button>
+            <button class="tab" id="tabMedia" type="button" style="display:none;">채팅</button>
+          </div>
+        </div>
+        <div class="panelBody" id="midBody">
+          <div id="peoplePanel"></div>
+          <div id="kakaoPanel" style="display:none;"></div>
+          <div id="mediaPanel" style="display:none;"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- column resizers (UI에서는 숨김 처리 예정) -->
+    <div class="resizer col" id="rzA1" title="드래그로 크기 조절"></div>
+    <div class="resizer col" id="rzA2" title="드래그로 크기 조절"></div>
+    <div class="resizer col" id="rzBCol" title="드래그로 크기 조절"></div>
+
+    <!-- Right (preview) -->
+    <div class="rightStack" id="rightStack">
+      <section class="card preview" id="cardPreview">
+        <div class="card__hd">
+          <div>
+            <div class="title">미리보기</div>
+            <div class="sub" id="previewSub"></div>
+          </div>
+        </div>
+        <div class="panelBody" id="chat"></div>
+      </section>
+    </div>
+  </main>
+
+
+  <script src="./kakao/app.js"></script>
+  <script src="./bridge.js"></script>
+</body>
+</html>

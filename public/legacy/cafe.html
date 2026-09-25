@@ -3,37 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RPBackupAssistant - 네이버카페</title>
+<title>네이버 카페 · AFTERLOG 기존 편집기</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Gothic:wght@400;700&family=Gothic+A1:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./cafe.css">
+<link rel="stylesheet" href="./cafe/cafe.css">
+<link rel="stylesheet" href="./legacy-embed.css">
 </head>
-<body>
+<body class="afterlog-embed">
+<!-- AFTERLOG: 원래 스크립트가 찾는 버튼·도움말을 숨긴 채 둔다(원본에서 이 요소들이 빠져 초기화와 입력 반영이 멈추던 문제).
+     실행취소·저장은 통합 셸 상단에서 이 도구로 전달된다. -->
+<div hidden aria-hidden="true">
+  <button id="undoBtn" type="button" tabindex="-1"></button>
+  <button id="redoBtn" type="button" tabindex="-1"></button>
+  <button id="helpBtn" type="button" tabindex="-1"></button>
+  <button id="resetAll" type="button" tabindex="-1"></button>
+  <button id="copyHtml" type="button" tabindex="-1"></button>
+  <button id="exportHtml" type="button" tabindex="-1"></button>
+  <button id="exportPng" type="button" tabindex="-1"></button>
+  <button id="exportJpg" type="button" tabindex="-1"></button>
+  <div id="helpModal"><button id="closeHelp" type="button" tabindex="-1"></button></div>
+</div>
 <main class="container" id="mainContainer">
     <div class="left-panel" id="leftPanel">
         <div class="panel-section input-section" id="inputSection">
             <div class="panel-header">📋 댓글 붙여넣기</div>
             <div class="input-wrapper">
-                <textarea id="inputArea" placeholder="네이버 카페 글/댓글을 여기에 붙여넣으세요...">작성자 정보
-	예시 A
-작성일시2026.01.18. 12:35
-안녕하세요.
-댓글 정보
-^댓글 2	
-등록순
-프로필
-예시 B
-2026.01.18. 12:44답글
-반갑습니다~ (인사한다)
-프로필
-예시 A작성자
-2026.01.18. 12:59답글
-(사망한다)
-프로필
-예시 B
-2026.01.18. 12:57답글
-어째서?! (놀란다)</textarea>
+                <textarea id="inputArea" placeholder="네이버 카페 글/댓글을 여기에 붙여넣으세요..."></textarea>
             </div>
         </div>
 
@@ -210,6 +206,7 @@
 
 <input type="file" id="avatarInput" class="hidden-input" accept="image/*">
 <div class="toast" id="toast"></div>
-<script src="./cafe.js"></script>
+<script src="./cafe/cafe.js"></script>
+<script src="./bridge.js"></script>
 </body>
 </html>
