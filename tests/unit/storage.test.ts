@@ -85,7 +85,7 @@ describe(".afterlog 프로젝트 파일", () => {
     edited = C.updateView(edited, (v) => void (v.theme = "dark"));
     await saveDocument(edited, 1);
 
-    const { blob } = await exportProjectFile(p.id);
+    const { files: [{ blob }] } = await exportProjectFile(p.id);
     const beforeAssets = (await listAssets(p.id)).map((a) => a.sha256).sort();
     const beforeSource = await (await listSources(p.id))[0].blob.arrayBuffer();
     await wipe(); // 새 브라우저 환경 흉내
@@ -112,7 +112,7 @@ describe(".afterlog 프로젝트 파일", () => {
 
   it("F22 손상·미래 버전·다른 파일은 명확히 실패하고 기존 자료를 건드리지 않는다", async () => {
     const { p } = await importFixture();
-    const { blob } = await exportProjectFile(p.id);
+    const { files: [{ blob }] } = await exportProjectFile(p.id);
     const files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
     const before = await db().projects.count();
 

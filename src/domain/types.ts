@@ -6,7 +6,7 @@ export const SCHEMA_VERSION = 1;
 export type Platform = "band";
 export type InputFormat = "band-post" | "band-member-comments";
 /** 원문이 어떤 형태로 들어왔는지 */
-export type SourceKind = "band-saved-page" | "band-html-fragment" | "band-plain-text";
+export type SourceKind = "band-saved-page" | "band-html-fragment" | "band-plain-text" | "band-collector-capture";
 
 /** 원문 표기를 그대로 두고, 해석이 확실할 때만 local 값을 채운다. */
 export interface TimeValue {
@@ -180,6 +180,8 @@ export interface Project {
   updatedAt: string;
   documentIds: string[];
   deletedAt?: string | null;
+  /** 수집 확장이 만든 파일을 불러올 때 함께 온 보고서(capture/report.json) */
+  captureReports?: unknown[];
 }
 
 export const ROOT = "root";

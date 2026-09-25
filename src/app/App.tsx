@@ -27,6 +27,7 @@ function writePref(key: string, v: string | null) {
 export function App() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState("");
+  const [captureReports, setCaptureReports] = useState<unknown[]>([]);
   const [docs, setDocs] = useState<DocumentData[]>([]);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [pendingSelect, setPendingSelect] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function App() {
     const list = await getDocuments(id);
     setProjectId(id);
     setProjectTitle(p.title);
+    setCaptureReports(p.captureReports ?? []);
     setDocs(list);
     setActiveDocId(preferDoc && list.some((d) => d.id === preferDoc) ? preferDoc : list[0]?.id ?? null);
     writePref(LAST_PROJECT_KEY, id);
@@ -114,6 +116,7 @@ export function App() {
         initial={active}
         projectId={projectId}
         projectTitle={projectTitle}
+        captureReports={captureReports}
         docs={docs}
         themeToggle={theme.toggle}
         onOpenDrawer={() => setDrawer(true)}

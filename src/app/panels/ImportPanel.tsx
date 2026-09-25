@@ -8,7 +8,7 @@ import type { LineInfo } from "../../importers/band/text";
 import { pickFiles } from "../download";
 
 const FORMAT_LABEL = { "band-post": "글과 댓글", "band-member-comments": "댓글 모음" } as const;
-const KIND_LABEL = { "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
+const KIND_LABEL = { "band-collector-capture": "수집기", "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
 const LINE_LABEL: Record<LineInfo["cls"], string> = { content: "내용", meta: "정보", ui: "UI", blank: "", unclassified: "미분류" };
 
 /** 텍스트 입력의 줄별 분류. 사라진 줄이 없는지 확인할 수 있게 전부 보여준다. */
@@ -201,6 +201,26 @@ export function ImportPanel({
         </button>
         <p className="small muted">파일은 이 브라우저 안에서만 처리되며 어디로도 전송되지 않습니다.</p>
       </div>
+      <details className="collector-box" open={!compact}>
+        <summary>
+          <b>글이 많다면: 수집 확장프로그램</b> <span className="small muted">(크롬·PC)</span>
+        </summary>
+        <p className="small">
+          밴드에 로그인한 크롬에서 글 하나, 여러 글, 글 목록 전체를 한 번에 모아 <b>.afterlog</b> 파일로 저장합니다. 그 파일을 '프로젝트 → 불러오기'로 열면 됩니다.
+        </p>
+        <ol className="small">
+          <li>
+            <a href="./afterlog-collector.zip" download>
+              수집 확장 받기 (afterlog-collector.zip)
+            </a>{" "}
+            → 압축 풀기
+          </li>
+          <li>크롬 주소창에 chrome://extensions → 오른쪽 위 '개발자 모드' 켜기</li>
+          <li>'압축해제된 확장 프로그램 로드' → 압축을 푼 폴더 선택</li>
+          <li>밴드 글이나 글 목록을 열고 확장 아이콘(A) → '이 글 저장' 또는 '이 목록의 글 모두 저장'</li>
+        </ol>
+        <p className="small muted">실제 밴드 화면에서의 동작은 아직 검증 전입니다. 문제가 생기면 수집 관리의 '문제 진단'에서 진단 파일(본문·이름·주소 없음)을 저장해 전달해 주세요.</p>
+      </details>
       <div className="paste-box">
         <label className="field">
           <span>또는 붙여넣기 (게시글 영역 HTML 또는 화면에서 복사한 글)</span>
@@ -218,7 +238,8 @@ export function ImportPanel({
           <li>밴드 글과 댓글 — 게시글 영역 HTML 조각(TXT·붙여넣기): 지원, 이미지는 링크만</li>
           <li>밴드 글과 댓글 — 화면 텍스트 복사: 지원(대체 경로). 답글 관계·정확한 시각·사진 없음</li>
           <li>멤버 댓글 모음(저장 페이지 뒤쪽 목록): 지원, 전체 목록인지는 확인 필요</li>
-          <li>게시글 모음·프로필·스토리·표정 상세·밴드 채팅: 아직 지원하지 않음 (실제 샘플 필요)</li>
+          <li>여러 글·글 목록 한꺼번에: 수집 확장프로그램으로 지원(가짜 밴드 화면에서 검증, 실제 밴드 미검증)</li>
+          <li>프로필·스토리·표정 종류/반응자·인물별 댓글 목록·밴드 채팅: 아직 지원하지 않음 (실제 샘플 필요)</li>
           <li>카카오톡·네이버카페·트위터: 이후 단계</li>
         </ul>
       </details>

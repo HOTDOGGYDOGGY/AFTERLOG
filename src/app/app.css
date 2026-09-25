@@ -1263,3 +1263,158 @@ hr {
 .display-panel > .ui-btn {
   align-self: flex-start;
 }
+
+/* ---------- 문서 목록·표정·채팅 ---------- */
+.doc-search {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.doc-rows li button,
+.hit-list li button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.doc-rows li,
+.hit-list li {
+  display: block;
+}
+.doc-rows li button:hover,
+.hit-list li button:hover {
+  background: var(--hover);
+}
+.doc-rows li button[aria-current="true"] {
+  background: var(--accent-soft);
+  font-weight: 700;
+}
+.doc-rows .ellipsis,
+.hit-list .ellipsis {
+  max-width: 100%;
+}
+.hit-text {
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.side-layout {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 16px;
+  padding: 16px 20px 60px;
+  align-content: start;
+}
+.side-main {
+  min-width: 0;
+}
+.side-note {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  align-self: start;
+}
+.side-note h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.side-note dl {
+  margin: 0;
+  font-size: 13px;
+}
+.side-note dt {
+  font-weight: 700;
+}
+.side-note dd {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+.reaction-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reaction-list li {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.reaction-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+.chip {
+  display: inline-flex;
+  padding: 1px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.empty-note {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  max-width: 640px;
+}
+.empty-note p {
+  margin: 0 0 8px;
+}
+.report {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.report p {
+  margin: 0 0 4px;
+}
+@media (max-width: 760px) {
+  .side-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.collector-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.collector-box summary {
+  cursor: pointer;
+}
+.collector-box ol {
+  margin: 6px 0;
+  padding-left: 18px;
+}

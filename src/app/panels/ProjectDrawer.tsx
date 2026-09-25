@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Project } from "../../domain/types";
 import { listProjects, purgeProject, renameProject, trashProject } from "../../storage/repo";
-import { importProjectFile } from "../../exporters/afterlog";
+import { importProjectFiles } from "../../exporters/afterlog";
 import { pickFiles } from "../download";
 
 export function ProjectDrawer({
@@ -29,14 +29,20 @@ export function ProjectDrawer({
   const trashed = projects.filter((p) => p.deletedAt);
 
   const load = async () => {
-    const [f] = await pickFiles(".afterlog,.zip", false);
-    if (!f) return;
+    const fs = await pickFiles(".afterlog,.zip", true);
+    if (!fs.length) return;
     setBusy(true);
     setMsg(null);
     try {
-      const p = await importProjectFile(f);
+      const r = await importProjectFiles(fs);
+      const p = r.project;
       await reload();
-      setMsg({ kind: "ok", text: `"${p.title}" 프로젝트를 새 사본으로 불러왔습니다.` });
+      setMsg({
+        kind: r.missingParts.length ? "error" : "ok",
+        text: r.missingParts.length
+          ? `"${p.title}"을(를) 불러왔지만 ${r.partCount}개 파트 중 ${r.missingParts.join(", ")}번 파트가 없어 이미지 ${r.missingAssets}개가 빠졌습니다. 빠진 파트와 함께 다시 불러오면 채워집니다.`
+          : `"${p.title}" 프로젝트를 새 사본으로 불러왔습니다${r.partCount > 1 ? ` (파트 ${r.partCount}개)` : ""}.`,
+      });
       onOpen(p.id);
     } catch (e) {
       setMsg({ kind: "error", text: (e as Error).message });
@@ -58,7 +64,7 @@ export function ProjectDrawer({
           <button type="button" className="ui-btn" disabled={busy} onClick={load}>
             {busy ? "불러오는 중…" : "프로젝트 파일(.afterlog) 불러오기"}
           </button>
-          <small className="muted">불러오면 항상 새 사본이 만들어지고 지금 프로젝트는 그대로 남습니다.</small>
+          <small className="muted">불러오면 항상 새 사본이 만들어지고 지금 프로젝트는 그대로 남습니다. 여러 파트로 나뉜 파일은 한꺼번에 선택하세요. 수집 확장이 만든 파일도 여기서 엽니다.</small>
           {msg ? <p className={`notice ${msg.kind}`}>{msg.text}</p> : null}
           <ul className="project-list">
             {active.map((p) => (

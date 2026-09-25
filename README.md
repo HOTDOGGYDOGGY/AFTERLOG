@@ -1,9 +1,9 @@
 # AFTERLOG · 애프터로그
 
-**바로 쓰기:** https://hotdoggydoggy.github.io/AFTERLOG/
+**바로 쓰기:** https://hotdoggydoggy.github.io/AFTERLOG/ · **수집 확장:** [afterlog-collector.zip](https://hotdoggydoggy.github.io/AFTERLOG/afterlog-collector.zip) ([설치·사용법](docs/collector.md))
 
 역극(RP) 기록을 원문과 함께 보관하고, 인물·이미지·표시 형식을 고쳐 다시 보거나 파일로 내보내는 도구.
-지금은 **밴드 게시글+댓글**을 지원합니다. 지원 범위는 [docs/support.md](docs/support.md)를 보세요.
+지금은 **밴드 게시글+댓글**을 지원합니다. 글이 많으면 **수집 확장프로그램**으로 글 목록 전체를 한 번에 모을 수 있습니다. 지원 범위는 [docs/support.md](docs/support.md)를 보세요.
 
 자료는 브라우저 안(IndexedDB)에만 저장되고 어디로도 전송되지 않습니다. 브라우저 데이터는 지워질 수 있으니 **프로젝트 저장(.afterlog)** 으로 복구 파일을 꼭 받아 두세요.
 
@@ -40,10 +40,12 @@ npm run build      # dist/ 에 정적 사이트 생성 (아무 정적 호스팅�
 
 ```bash
 npm run typecheck
-npm test           # Vitest (파서·편집·저장·내보내기)
-npm run e2e        # Playwright (실제 브라우저 흐름)
+npm test           # Vitest (파서·편집·저장·내보내기·수집기·진단)
+npm run e2e        # Playwright (웹 앱 흐름)
+npm run build:collector:test && npx playwright test --config playwright.collector.config.ts   # 수집 확장(가짜 밴드 서버)
 ```
 
 - 실제 사용자 샘플은 `tests/private/`에 두면 추가 테스트가 실행됩니다. 이 폴더는 `.gitignore` 대상이며 올리지 않습니다.
+- 수집 확장: `collector/` ([docs/collector.md](docs/collector.md)). `.afterlog` 규격은 `src/archive/`를 웹 앱과 함께 씀.
 - 구조: `src/importers`(순수 파서) → `src/domain`(모델·검증) → `src/editor`(명령·실행취소) → `src/storage`(IndexedDB) → `src/renderers`(출력 스킨) → `src/exporters`(.afterlog·HTML·PNG) → `src/app`(화면)
 - 이관표: [docs/band-migration.md](docs/band-migration.md), 검수 기록: [docs/qa-log.md](docs/qa-log.md)

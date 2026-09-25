@@ -3,3 +3,5 @@ dist/
 test-results/
 playwright-report/
 tests/private/
+dist-collector/
+dist-collector-test/

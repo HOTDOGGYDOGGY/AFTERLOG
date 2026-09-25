@@ -12,13 +12,17 @@ import { Inspector } from "./panels/Inspector";
 import { PeoplePanel } from "./panels/PeoplePanel";
 import { Preview } from "./Preview";
 import { PersonArchive } from "./PersonArchive";
+import { ChatView, ReactionsView } from "./ReactionsView";
+import { DocList } from "./panels/DocList";
+import { CaptureReports } from "./panels/CaptureReports";
 import { MenuButton } from "../components/Menu";
 import { useAssets } from "./useAssets";
 import { useDocEditor, type SaveStatus } from "./useDocEditor";
 import { usePanelWidths } from "./usePanelWidths";
 
-type Tab = "import" | "people" | "display" | "assets";
+type Tab = "docs" | "import" | "people" | "display" | "assets";
 const TABS: [Tab, string][] = [
+  ["docs", "문서 목록"],
   ["import", "가져오기·검토"],
   ["people", "인물"],
   ["display", "표시"],
@@ -31,6 +35,7 @@ interface Props {
   initial: DocumentData;
   projectId: string;
   projectTitle: string;
+  captureReports?: unknown[];
   docs: DocumentData[];
   themeToggle: ReactNode;
   onOpenDrawer(): void;
@@ -44,13 +49,13 @@ function isTypingTarget(t: EventTarget | null) {
   return !!el && (el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
 }
 
-export function Workspace({ initial, projectId, projectTitle, docs, themeToggle, onOpenDrawer, onSwitchDoc, onImported, initialSelected }: Props) {
+export function Workspace({ initial, projectId, projectTitle, captureReports, docs, themeToggle, onOpenDrawer, onSwitchDoc, onImported, initialSelected }: Props) {
   const editor = useDocEditor(initial);
   const { doc } = editor;
   const assets = useAssets(projectId);
-  const [tab, setTab] = useState<Tab>(() => (initial.issues.some((i) => !i.resolved) ? "import" : "people"));
+  const [tab, setTab] = useState<Tab>(() => (docs.length > 4 ? "docs" : initial.issues.some((i) => !i.resolved) ? "import" : "people"));
   const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
-  const [view, setView] = useState<"document" | "people">("document");
+  const [view, setView] = useState<"document" | "people" | "reactions" | "chat">("document");
   const [scrollTo, setScrollTo] = useState<string | null>(initialSelected ?? null);
   const [exportOpen, setExportOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -128,13 +133,12 @@ export function Workspace({ initial, projectId, projectTitle, docs, themeToggle,
   const saveProject = async (includeSources = true) => {
     try {
       await editor.flush();
-      const { blob, fileName } = await exportProjectFile(projectId, { includeSources });
-      downloadBlob(blob, fileName);
+      const { files } = await exportProjectFile(projectId, { includeSources });
+      for (const f of files) downloadBlob(f.blob, f.fileName);
+      const names = files.map((f) => f.fileName).join(", ");
       setNotice({
         kind: "ok",
-        text: includeSources
-          ? `프로젝트 파일(${fileName})을 받았습니다. 원문·편집 내용·이미지가 모두 들어 있습니다.`
-          : `공유용 프로젝트 파일(${fileName})을 받았습니다. 원본 HTML/텍스트는 빠져 있고 편집 내용·이미지는 들어 있습니다.`,
+        text: `${includeSources ? "프로젝트 파일" : "공유용 프로젝트 파일(원본 HTML/텍스트 제외)"}을 받았습니다: ${names}${files.length > 1 ? " — 여러 파트로 나뉘었습니다. 불러올 때 모두 함께 선택하세요." : ""}`,
       });
     } catch (e) {
       onError(`프로젝트 저장 실패: ${(e as Error).message}`);
@@ -189,7 +193,7 @@ export function Workspace({ initial, projectId, projectTitle, docs, themeToggle,
         {themeToggle}
       </header>
 
-      {docs.length > 1 ? (
+      {docs.length > 1 && docs.length <= 4 ? (
         <nav className="doc-tabs" aria-label="문서">
           {docs.map((d) => (
             <button
@@ -260,7 +264,7 @@ export function Workspace({ initial, projectId, projectTitle, docs, themeToggle,
         </button>
         <aside className="left-panel" aria-label="설정 패널">
           <div className="tabs" role="tablist">
-            {TABS.map(([k, label]) => (
+            {TABS.filter(([k]) => k !== "docs" || docs.length > 1).map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
                 {label}
                 {k === "import" && openIssues.length ? <span className="badge">{openIssues.length}</span> : null}
@@ -268,8 +272,21 @@ export function Workspace({ initial, projectId, projectTitle, docs, themeToggle,
             ))}
           </div>
           <div className="panel-body" role="tabpanel">
+            {tab === "docs" ? (
+              <DocList
+                docs={allDocs}
+                currentId={doc.id}
+                onOpen={async (id, entryId) => {
+                  if (entryId) return void jump(id, entryId);
+                  if (id === doc.id) return;
+                  await editor.flush();
+                  onSwitchDoc(id);
+                }}
+              />
+            ) : null}
             {tab === "import" ? (
               <>
+                <CaptureReports reports={captureReports ?? []} />
                 {Object.values(doc.entries).some((x) => x.suggestedParentId) ? (
                   <div className="notice warn">
                     답글 연결 제안 {Object.values(doc.entries).filter((x) => x.suggestedParentId).length}개가 있습니다(확정 아님).
@@ -348,11 +365,21 @@ export function Workspace({ initial, projectId, projectTitle, docs, themeToggle,
             <button type="button" role="tab" aria-selected={view === "people"} aria-pressed={view === "people"} onClick={() => setView("people")}>
               인물별
             </button>
+            <button type="button" role="tab" aria-selected={view === "reactions"} aria-pressed={view === "reactions"} onClick={() => setView("reactions")}>
+              표정·반응
+            </button>
+            <button type="button" role="tab" aria-selected={view === "chat"} aria-pressed={view === "chat"} onClick={() => setView("chat")}>
+              채팅
+            </button>
           </div>
           {view === "document" ? (
             <Preview editor={editor} assetUrl={assets.url} selectedId={selected} onSelect={setSelected} onInsertImage={insertImage} />
-          ) : (
+          ) : view === "people" ? (
             <PersonArchive docs={allDocs} currentDocId={doc.id} assetUrl={assets.url} onJump={jump} />
+          ) : view === "reactions" ? (
+            <ReactionsView docs={allDocs} onJump={jump} />
+          ) : (
+            <ChatView />
           )}
         </main>
 

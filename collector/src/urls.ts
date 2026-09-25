@@ -1,0 +1,51 @@
+import { BAND_ORIGINS } from "./config";
+
+export type BandUrl =
+  | { kind: "post"; origin: string; bandNo: string; postNo: string; canonical: string }
+  | { kind: "feed"; origin: string; bandNo: string; canonical: string }
+  | { kind: "member-list"; origin: string; bandNo: string; memberKey: string; list: "post" | "comment"; canonical: string }
+  | { kind: "band-other"; origin: string; bandNo: string; canonical: string };
+
+/** 밴드 주소 해석. 허용된 밴드 주소가 아니면 null */
+export function parseBandUrl(raw: string, origins = BAND_ORIGINS): BandUrl | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  const origin = u.origin;
+  if (!origins.includes(origin)) return null;
+  const canonicalOrigin = origin.replace("://www.", "://");
+  let m = u.pathname.match(/^\/band\/(\d+)\/post\/(\d+)\/?$/);
+  if (m) return { kind: "post", origin, bandNo: m[1], postNo: m[2], canonical: `${canonicalOrigin}/band/${m[1]}/post/${m[2]}` };
+  m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)\/(post|comment)\/?$/);
+  if (m) return { kind: "member-list", origin, bandNo: m[1], memberKey: m[2], list: m[3] as "post" | "comment", canonical: `${canonicalOrigin}${u.pathname}` };
+  m = u.pathname.match(/^\/band\/(\d+)(\/post)?\/?$/);
+  if (m) return { kind: "feed", origin, bandNo: m[1], canonical: `${canonicalOrigin}/band/${m[1]}/post` };
+  m = u.pathname.match(/^\/band\/(\d+)(\/.*)?$/);
+  if (m) return { kind: "band-other", origin, bandNo: m[1], canonical: `${canonicalOrigin}${u.pathname}` };
+  return null;
+}
+
+/** 작업 키: 출처 + 밴드 + 종류 + 원본 ID (명세 8.1) */
+export function postKey(bandNo: string, postNo: string) {
+  return `band:${bandNo}:post:${postNo}`;
+}
+
+/** 여러 줄 입력에서 글 주소만 골라 중복 없이 */
+export function parsePostUrlList(text: string, origins = BAND_ORIGINS): { posts: Extract<BandUrl, { kind: "post" }>[]; rejected: string[] } {
+  const posts: Extract<BandUrl, { kind: "post" }>[] = [];
+  const rejected: string[] = [];
+  const seen = new Set<string>();
+  for (const line of text.split(/\s+/).map((x) => x.trim()).filter(Boolean)) {
+    const p = parseBandUrl(line, origins);
+    if (p?.kind === "post") {
+      if (!seen.has(p.canonical)) {
+        seen.add(p.canonical);
+        posts.push(p);
+      }
+    } else rejected.push(line);
+  }
+  return { posts, rejected };
+}

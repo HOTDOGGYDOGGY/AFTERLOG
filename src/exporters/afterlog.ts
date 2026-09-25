@@ -1,205 +1,82 @@
-// .afterlog 복구용 프로젝트 파일 (ZIP 컨테이너). 명세 11.2.
-import { unzip, zip, strFromU8, strToU8 } from "fflate";
+// 웹 앱의 .afterlog 저장·불러오기. 파일 규격은 src/archive/ (수집 확장과 공용).
 import { newId, nowIso } from "../domain/ids";
-import { ROOT, SCHEMA_VERSION, type ContentBlock, type DocumentData, type Project, type SourceImport } from "../domain/types";
-import { validateDocument } from "../domain/validate";
+import { ROOT, SCHEMA_VERSION, type ContentBlock, type DocumentData, type Project, type ReviewIssue, type SourceImport } from "../domain/types";
 import { normalizeDocument } from "../domain/migrate";
 import { db, type StoredAsset } from "../storage/db";
-import { sha256Hex } from "../storage/hash";
 import { getDocuments, listAssets, listSources } from "../storage/repo";
 import { safeName } from "./fileName";
+import { readArchive, type ArchiveReadResult } from "../archive/reader";
+import { writeArchive } from "../archive/writer";
+import { ProjectFileError } from "../archive/format";
 
-export const AFTERLOG_FORMAT = "afterlog";
-export const AFTERLOG_FORMAT_VERSION = 1;
-export const APP_VERSION = "0.1.0";
-
-export const PROJECT_FILE_LIMITS = { maxEntries: 10000, maxTotalBytes: 1024 * 1024 * 1024, maxJsonBytes: 64 * 1024 * 1024 };
-
-interface ManifestFile {
-  id: string;
-  path: string;
-  size: number;
-  sha256: string;
-  mime: string;
-  name: string;
-}
-
-export interface Manifest {
-  format: typeof AFTERLOG_FORMAT;
-  formatVersion: number;
-  schemaVersion: number;
-  appVersion: string;
-  exportedAt: string;
-  projectId: string;
-  assets: ManifestFile[];
-  sources: (ManifestFile & { importedAt: string; parserVersion: string; kind?: string; sourceUrl?: string })[];
-  /** 공유용으로 원문을 뺀 경우 */
-  sourcesOmitted?: boolean;
-  /** 문서가 참조하지만 파일이 없는 이미지(미확보) 수 */
-  missingImages?: number;
-}
-
-interface ProjectJson {
-  project: Project;
-  documents: DocumentData[];
-}
-
-export class ProjectFileError extends Error {
-  name = "ProjectFileError";
-}
-
-function zipAsync(files: Record<string, Uint8Array>): Promise<Uint8Array> {
-  return new Promise((res, rej) => zip(files, { level: 0 }, (e, d) => (e ? rej(e) : res(d))));
-}
+export { ProjectFileError };
+export const APP_VERSION = "0.2.0";
 
 /**
  * includeSources=false: 공유용 사본. 원본 HTML/텍스트(로그인 정보·주변 화면이 섞일 수 있음)를 빼고
  * manifest에 제외했다고 기록한다. 편집 문서·이미지는 모두 포함한다.
+ * 첨부가 많으면 여러 파일(파트)로 나뉜다.
  */
-export async function exportProjectFile(projectId: string, opts: { includeSources?: boolean } = {}): Promise<{ blob: Blob; fileName: string }> {
+export async function exportProjectFile(
+  projectId: string,
+  opts: { includeSources?: boolean; maxPartBytes?: number } = {},
+): Promise<{ files: { blob: Blob; fileName: string }[] }> {
   const includeSources = opts.includeSources ?? true;
   const project = await db().projects.get(projectId);
   if (!project) throw new Error("프로젝트가 없습니다.");
   const documents = await getDocuments(projectId);
   const assets = await listAssets(projectId);
   const sources = includeSources ? await listSources(projectId) : [];
-
-  const files: Record<string, Uint8Array> = {};
-  const manifest: Manifest = {
-    format: AFTERLOG_FORMAT,
-    formatVersion: AFTERLOG_FORMAT_VERSION,
-    schemaVersion: SCHEMA_VERSION,
-    appVersion: APP_VERSION,
-    exportedAt: nowIso(),
-    projectId,
-    assets: [],
-    sources: [],
-    sourcesOmitted: !includeSources,
-    missingImages: documents.reduce(
-      (n, d) => n + Object.values(d.entries).reduce((m, e) => m + e.blocks.filter((b) => b.type === "image" && !b.assetId).length, 0),
-      0,
-    ),
-  };
-  for (const a of assets) {
-    const path = `assets/${a.id}`;
-    files[path] = new Uint8Array(await a.blob.arrayBuffer());
-    manifest.assets.push({ id: a.id, path, size: a.size, sha256: a.sha256, mime: a.mime, name: a.name });
+  const base = `${safeName(project.title)}${includeSources ? "" : "_공유용"}`;
+  const files: { blob: Blob; fileName: string }[] = [];
+  for await (const part of writeArchive(
+    {
+      project,
+      documents,
+      assets: assets.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, sha256: a.sha256, data: a.blob })),
+      sources: sources.map((s) => ({
+        id: s.id,
+        fileName: s.fileName,
+        mime: s.mime,
+        importedAt: s.importedAt,
+        parserVersion: s.parserVersion,
+        sha256: s.sha256,
+        kind: s.kind,
+        sourceUrl: s.sourceUrl,
+        data: s.blob,
+      })),
+      sourcesOmitted: !includeSources,
+      appVersion: APP_VERSION,
+      producer: "afterlog-web",
+      exportedAt: nowIso(),
+    },
+    { maxPartBytes: opts.maxPartBytes },
+  )) {
+    const suffix = part.partCount > 1 ? `_part${String(part.partIndex).padStart(2, "0")}of${String(part.partCount).padStart(2, "0")}` : "";
+    files.push({ blob: new Blob([part.bytes as BlobPart], { type: "application/zip" }), fileName: `${base}${suffix}.afterlog` });
   }
-  for (const s of sources) {
-    const path = `sources/${s.id}`;
-    files[path] = new Uint8Array(await s.blob.arrayBuffer());
-    manifest.sources.push({
-      id: s.id,
-      path,
-      size: s.blob.size,
-      sha256: s.sha256,
-      mime: s.mime,
-      name: s.fileName,
-      importedAt: s.importedAt,
-      parserVersion: s.parserVersion,
-      kind: s.kind,
-      sourceUrl: s.sourceUrl,
-    });
-  }
-  const pj: ProjectJson = { project, documents };
-  files["project.json"] = strToU8(JSON.stringify(pj));
-  files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 2));
-  const bytes = await zipAsync(files);
-  return {
-    blob: new Blob([bytes as BlobPart], { type: "application/zip" }),
-    fileName: `${safeName(project.title)}${includeSources ? "" : "_공유용"}.afterlog`,
-  };
+  return { files };
 }
 
-// ---------- 불러오기 ----------
-
-const PATH_RE = /^(manifest\.json|project\.json|assets\/[\w-]+|sources\/[\w-]+)$/;
-
-function unzipChecked(data: Uint8Array): Promise<Record<string, Uint8Array>> {
-  let entries = 0;
-  let total = 0;
-  let problem = "";
-  return new Promise((resolve, reject) => {
-    unzip(
-      data,
-      {
-        filter(f) {
-          entries++;
-          total += f.originalSize;
-          if (entries > PROJECT_FILE_LIMITS.maxEntries) problem = "프로젝트 파일 안 항목 수가 너무 많습니다.";
-          if (total > PROJECT_FILE_LIMITS.maxTotalBytes) problem = "압축을 풀면 1GB를 넘는 프로젝트 파일은 열 수 없습니다.";
-          if ((f.name === "project.json" || f.name === "manifest.json") && f.originalSize > PROJECT_FILE_LIMITS.maxJsonBytes)
-            problem = "프로젝트 데이터가 비정상적으로 큽니다.";
-          if (problem) return false;
-          return PATH_RE.test(f.name);
-        },
-      },
-      (err, out) => {
-        if (problem) reject(new ProjectFileError(problem));
-        else if (err) reject(new ProjectFileError(`프로젝트 파일이 손상되었거나 .afterlog 형식이 아닙니다. (${err.message})`));
-        else resolve(out);
-      },
-    );
-  });
+/** 파일 검사만 수행 (DB에 쓰지 않음). 분할 파트는 한꺼번에 넘긴다. */
+export async function readProjectFile(file: Blob | Blob[]): Promise<ArchiveReadResult> {
+  return readArchive(Array.isArray(file) ? file : [file]);
 }
 
-function parseJson<T>(bytes: Uint8Array | undefined, name: string): T {
-  if (!bytes) throw new ProjectFileError(`${name}이(가) 없습니다. .afterlog 파일이 맞는지 확인해 주세요.`);
-  try {
-    return JSON.parse(strFromU8(bytes)) as T;
-  } catch {
-    throw new ProjectFileError(`${name}을(를) 읽을 수 없습니다(손상).`);
-  }
-}
-
-export interface ProjectFileCheck {
-  manifest: Manifest;
-  data: ProjectJson;
-  files: Record<string, Uint8Array>;
-}
-
-/** 파일 검사만 수행 (DB에 쓰지 않음) */
-export async function readProjectFile(file: Blob): Promise<ProjectFileCheck> {
-  const files = await unzipChecked(new Uint8Array(await file.arrayBuffer()));
-  const manifest = parseJson<Manifest>(files["manifest.json"], "manifest.json");
-  if (manifest.format !== AFTERLOG_FORMAT) throw new ProjectFileError(".afterlog 프로젝트 파일이 아닙니다.");
-  if (typeof manifest.formatVersion !== "number" || manifest.formatVersion > AFTERLOG_FORMAT_VERSION) {
-    throw new ProjectFileError(
-      `이 파일은 더 새로운 AFTERLOG(파일 형식 ${manifest.formatVersion})에서 만들어졌습니다. 이 버전은 형식 ${AFTERLOG_FORMAT_VERSION}까지 읽을 수 있습니다. 앱을 업데이트해 주세요.`,
-    );
-  }
-  const data = parseJson<ProjectJson>(files["project.json"], "project.json");
-  if (!data.project?.id || !Array.isArray(data.documents)) throw new ProjectFileError("project.json 구조가 올바르지 않습니다.");
-
-  // 자산·원문 무결성
-  for (const m of [...(manifest.assets ?? []), ...(manifest.sources ?? [])]) {
-    const bytes = files[m.path];
-    if (!bytes) throw new ProjectFileError(`파일이 빠져 있습니다: ${m.path}`);
-    const h = await sha256Hex(bytes);
-    if (h !== m.sha256) throw new ProjectFileError(`파일 내용이 기록과 다릅니다(손상): ${m.path}`);
-  }
-  const assetIds = new Set((manifest.assets ?? []).map((a) => a.id));
-  for (const doc of data.documents) {
-    const errs = validateDocument(doc);
-    if (errs.length) throw new ProjectFileError(`문서 "${doc.title}"의 관계 정보가 손상되었습니다: ${errs.slice(0, 3).join(", ")}`);
-    for (const idn of Object.values(doc.identities)) {
-      if (idn.avatarAssetId && !assetIds.has(idn.avatarAssetId)) throw new ProjectFileError(`프로필 이미지 자산이 없습니다: ${idn.avatarAssetId}`);
-    }
-    for (const e of Object.values(doc.entries)) {
-      for (const b of [...e.blocks, ...(e.excerpt ?? [])]) {
-        if (b.type === "image" && b.assetId && !assetIds.has(b.assetId)) throw new ProjectFileError(`이미지 자산이 없습니다: ${b.assetId}`);
-      }
-    }
-  }
-  return { manifest, data, files };
+export interface ImportOutcome {
+  project: Project;
+  missingParts: number[];
+  partCount: number;
+  missingAssets: number;
 }
 
 /**
  * 프로젝트 파일을 새 사본으로 불러온다. 모든 ID를 새로 발급하고 내부 참조를 함께 바꾼다.
- * 현재 열린 프로젝트는 건드리지 않는다.
+ * 현재 열린 프로젝트는 건드리지 않는다. 빠진 파트의 이미지는 '미확보'로 바꾸고 검토 항목을 남긴다.
  */
-export async function importProjectFile(file: Blob): Promise<Project> {
-  const { manifest, data, files } = await readProjectFile(file);
+export async function importProjectFiles(files: Blob | Blob[]): Promise<ImportOutcome> {
+  const r = await readProjectFile(files);
+  const { manifest, data } = r;
   const map = new Map<string, string>();
   const re = (id: string | null | undefined): string | null => {
     if (!id) return null;
@@ -210,21 +87,23 @@ export async function importProjectFile(file: Blob): Promise<Project> {
     }
     return n;
   };
+  const reAsset = (id: string | null | undefined) => (id && !r.missingAssetIds.has(id) ? re(id) : null);
   const now = nowIso();
   const projectId = re(data.project.id)!;
 
-  const reBlocks = (bs: ContentBlock[] | undefined) =>
-    bs?.map((b) => (b.type === "image" ? { ...b, assetId: b.assetId ? re(b.assetId) : null } : { ...b }));
+  const reBlocks = (bs: ContentBlock[] | undefined) => bs?.map((b) => (b.type === "image" ? { ...b, assetId: reAsset(b.assetId) } : { ...b }));
 
   const documents: DocumentData[] = data.documents.map(normalizeDocument).map((doc) => {
     const identities: DocumentData["identities"] = {};
     for (const idn of Object.values(doc.identities)) {
       const id = re(idn.id)!;
-      identities[id] = { ...idn, id, avatarAssetId: idn.avatarAssetId ? re(idn.avatarAssetId) : null };
+      identities[id] = { ...idn, id, avatarAssetId: reAsset(idn.avatarAssetId) };
     }
     const entries: DocumentData["entries"] = {};
+    let lost = 0;
     for (const e of Object.values(doc.entries)) {
       const id = re(e.id)!;
+      lost += [...e.blocks, ...(e.excerpt ?? [])].filter((b) => b.type === "image" && b.assetId && r.missingAssetIds.has(b.assetId)).length;
       entries[id] = {
         ...e,
         id,
@@ -232,10 +111,20 @@ export async function importProjectFile(file: Blob): Promise<Project> {
         blocks: reBlocks(e.blocks)!,
         originalBlocks: reBlocks(e.originalBlocks)!,
         excerpt: reBlocks(e.excerpt),
+        suggestedParentId: e.suggestedParentId ? re(e.suggestedParentId) ?? undefined : undefined,
       };
     }
     const children: DocumentData["children"] = {};
     for (const [p, list] of Object.entries(doc.children)) children[p === ROOT ? ROOT : re(p)!] = list.map((x) => re(x)!);
+    const issues: ReviewIssue[] = doc.issues.map((i) => ({ ...i, id: newId(), entryId: i.entryId ? re(i.entryId) ?? undefined : undefined }));
+    const lostAvatars = Object.values(doc.identities).filter((i) => i.avatarAssetId && r.missingAssetIds.has(i.avatarAssetId)).length;
+    if (lost || lostAvatars)
+      issues.push({
+        id: newId(),
+        kind: "missing-image",
+        message: `분할 파일 중 빠진 파트(${r.missingParts.join(", ")}번)에 있던 이미지 ${lost + lostAvatars}개를 불러오지 못했습니다. 그 파트를 함께 넣어 다시 불러오면 채워집니다.`,
+        resolved: false,
+      });
     return {
       ...doc,
       id: re(doc.id)!,
@@ -245,7 +134,7 @@ export async function importProjectFile(file: Blob): Promise<Project> {
       identityOrder: doc.identityOrder.map((x) => re(x)!),
       entries,
       children,
-      issues: doc.issues.map((i) => ({ ...i, id: newId(), entryId: i.entryId ? re(i.entryId) ?? undefined : undefined })),
+      issues,
       revision: 1,
     };
   });
@@ -258,29 +147,34 @@ export async function importProjectFile(file: Blob): Promise<Project> {
     updatedAt: now,
     deletedAt: null,
     schemaVersion: SCHEMA_VERSION,
+    captureReports: [...(data.project.captureReports ?? []), ...(r.captureReport ? [r.captureReport] : [])],
   };
-  const assets: StoredAsset[] = (manifest.assets ?? []).map((m) => ({
-    id: re(m.id)!,
-    projectId,
-    name: m.name,
-    mime: m.mime,
-    size: m.size,
-    sha256: m.sha256,
-    blob: new Blob([files[m.path] as BlobPart], { type: m.mime }),
-    createdAt: now,
-  }));
-  const sources: SourceImport[] = (manifest.sources ?? []).map((m) => ({
-    id: re(m.id)!,
-    projectId,
-    fileName: m.name,
-    mime: m.mime,
-    importedAt: m.importedAt,
-    parserVersion: m.parserVersion,
-    sha256: m.sha256,
-    blob: new Blob([files[m.path] as BlobPart], { type: m.mime }),
-    kind: m.kind as SourceImport["kind"],
-    sourceUrl: m.sourceUrl,
-  }));
+  const assets: StoredAsset[] = (manifest.assets ?? [])
+    .filter((m) => r.files[m.path])
+    .map((m) => ({
+      id: re(m.id)!,
+      projectId,
+      name: m.name,
+      mime: m.mime,
+      size: m.size,
+      sha256: m.sha256,
+      blob: new Blob([r.files[m.path] as BlobPart], { type: m.mime }),
+      createdAt: now,
+    }));
+  const sources: SourceImport[] = (manifest.sources ?? [])
+    .filter((m) => r.files[m.path])
+    .map((m) => ({
+      id: re(m.id)!,
+      projectId,
+      fileName: m.name,
+      mime: m.mime,
+      importedAt: m.importedAt,
+      parserVersion: m.parserVersion,
+      sha256: m.sha256,
+      blob: new Blob([r.files[m.path] as BlobPart], { type: m.mime }),
+      kind: m.kind as SourceImport["kind"],
+      sourceUrl: m.sourceUrl,
+    }));
 
   const d = db();
   await d.transaction("rw", [d.projects, d.documents, d.sources, d.assets], async () => {
@@ -289,5 +183,10 @@ export async function importProjectFile(file: Blob): Promise<Project> {
     await d.sources.bulkAdd(sources);
     await d.assets.bulkAdd(assets);
   });
-  return project;
+  return { project, missingParts: r.missingParts, partCount: r.partCount, missingAssets: r.missingAssetIds.size };
+}
+
+/** 이전 이름 호환 */
+export async function importProjectFile(file: Blob): Promise<Project> {
+  return (await importProjectFiles(file)).project;
 }

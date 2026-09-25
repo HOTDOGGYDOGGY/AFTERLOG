@@ -147,7 +147,7 @@ export async function analyzeFiles(files: File[], projectId: string | null, past
     else addText("붙여넣은 글.txt", bytes);
   }
 
-  const rank: Record<SourceKind, number> = { "band-saved-page": 0, "band-html-fragment": 1, "band-plain-text": 2 };
+  const rank: Record<SourceKind, number> = { "band-collector-capture": 0, "band-saved-page": 0, "band-html-fragment": 1, "band-plain-text": 2 };
   cands.sort((a, b) => rank[a.kind] - rank[b.kind]);
   if (!cands.length)
     throw new Error(
@@ -156,7 +156,7 @@ export async function analyzeFiles(files: File[], projectId: string | null, past
   const main = cands[0];
   const others = cands.slice(1);
   if (others.length) {
-    const label = { "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
+    const label = { "band-collector-capture": "수집기", "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
     warnings.push(
       `입력이 ${cands.length}개 있어 가장 정확한 ${label[main.kind]}(${main.name})를 사용했습니다. 나머지(${others.map((o) => `${label[o.kind]} ${o.name}`).join(", ")})는 가져오지 않았습니다.`,
     );

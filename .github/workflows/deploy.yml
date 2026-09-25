@@ -30,6 +30,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # 수집 확장도 빌드해서 사이트에서 받을 수 있게 한다(dist/afterlog-collector.zip)
+      - run: npm run build:collector
+      - run: cd dist-collector && zip -qr ../dist/afterlog-collector.zip .
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
