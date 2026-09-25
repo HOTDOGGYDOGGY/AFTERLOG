@@ -16,6 +16,8 @@ export const LIMITS = {
   sameErrorPause: 3,
   /** 목록에서 새 글이 안 나오는 스크롤 횟수 → 끝 확인 불가 */
   emptyRoundsToStop: 3,
+  /** 로딩 표시가 계속 보여도 새 글이 이만큼 연속으로 없으면 끝으로 본다 */
+  emptyRoundsWhileLoading: 8,
   maxListRounds: 400,
   /** 첨부 동시 처리 */
   assetConcurrency: 2,

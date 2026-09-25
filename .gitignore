@@ -6,3 +6,4 @@ tests/private/
 dist-collector/
 dist-collector-test/
 scratch-*.mjs
+dist-local/

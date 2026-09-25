@@ -1,12 +1,13 @@
 {
   "name": "afterlog",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p . && vite build",
     "preview": "vite preview",
+    "build:local": "tsc -p . && vite build --mode offline",
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -37,5 +38,5 @@
     "vite": "8.3.1",
     "vitest": "5.0.1"
   },
-  "collectorVersion": "0.1.1"
+  "collectorVersion": "0.1.2"
 }

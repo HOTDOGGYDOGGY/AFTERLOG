@@ -45,7 +45,7 @@ function browserFor(pages: Record<string, string>): CollectorBrowser {
       return { ex, loadMs: 100 };
     },
     openList: async () => {},
-    discoverRound: async () => ({ links: [], scrollHeight: 0, loading: false, endMarker: false, loginRequired: false }),
+    discoverRound: async () => ({ links: [], scrollHeight: 0, loading: false, atBottom: true, endMarker: false, loginRequired: false }),
     sampleStructure: async () => null,
     fetchAsset: async () => ({ ok: false, code: "assetNetwork" }),
     dispose: async () => {},
@@ -216,5 +216,43 @@ describe("C06 배경 목록 + 상세 레이어", () => {
     expect(r.html).not.toContain("data-token");
     expect(r.html).not.toContain("data-uid");
     expect(r.html).toContain('data-viewname="DCommentView"');
+  });
+});
+
+describe("실사용 진단(목록 단계에서 멈춤) 회귀", () => {
+  const listUrl = "https://band.us/band/1/post";
+  const pages = Object.fromEntries([1, 2, 3].map((n) => [`https://band.us/band/1/post/${n}`, postHtml(n)]));
+
+  it("로딩 표시가 계속 보여도 새 글이 연속으로 없으면 목록을 끝내고 글 수집으로 넘어간다", async () => {
+    const job = await createJob({ label: "r", scope: "list", bandNo: "1", options: { ...DEFAULT_OPTIONS, includeImages: false }, lists: [listUrl] });
+    const b = browserFor(pages);
+    let round = 0;
+    b.discoverRound = async () => {
+      round++;
+      const links = round >= 2 ? [1, 2, 3].map((n) => `https://band.us/band/1/post/${n}`) : ["https://band.us/band/1/post/1"];
+      return { links, scrollHeight: 5000, loading: true, atBottom: true, endMarker: false, loginRequired: false };
+    };
+    expect(await new Engine({ browser: b, ...clock() }).run(job.id)).toBe("done");
+    expect(round).toBeLessThan(20);
+    const tasks = await cdb().tasks.where("jobId").equals(job.id).toArray();
+    expect(tasks.filter((t) => t.kind === "post" && (t.status === "succeeded" || t.status === "partial"))).toHaveLength(3);
+  });
+
+  it("목록 읽기가 중간에 끊기면(Frame … removed) 찾은 글부터 수집하고 목록은 '일부'로 남긴다", async () => {
+    const job = await createJob({ label: "r", scope: "list", bandNo: "1", options: { ...DEFAULT_OPTIONS, includeImages: false }, lists: [listUrl] });
+    const b = browserFor(pages);
+    let round = 0;
+    b.discoverRound = async () => {
+      round++;
+      if (round === 3) throw new Error("Frame with ID 0 was removed.");
+      return { links: [`https://band.us/band/1/post/${round}`], scrollHeight: 1000 * round, loading: false, atBottom: true, endMarker: false, loginRequired: false };
+    };
+    expect(await new Engine({ browser: b, ...clock() }).run(job.id)).toBe("done");
+    const tasks = await cdb().tasks.where("jobId").equals(job.id).toArray();
+    const list = tasks.find((t) => t.kind === "list")!;
+    expect(list.status).toBe("succeeded");
+    expect(list.result?.coverage).toBe("partial");
+    expect(list.result?.evidence).toContain("끊겨");
+    expect(tasks.filter((t) => t.kind === "post" && t.status !== "pending")).toHaveLength(2);
   });
 });

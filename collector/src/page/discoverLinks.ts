@@ -4,7 +4,10 @@
 export interface DiscoverRound {
   links: string[];
   scrollHeight: number;
+  /** 목록 아래쪽에 로딩 표시가 보이는지(좁은 기준. 넓게 잡으면 끝나지 않는 문제가 있었다) */
   loading: boolean;
+  /** 스크롤이 문서 끝에 닿았는지 */
+  atBottom: boolean;
   /** 명시적인 끝 표시를 찾았는지(검증된 표시가 없으면 false) */
   endMarker: boolean;
   loginRequired: boolean;
@@ -26,11 +29,21 @@ export async function discoverRoundInPage(opts: { bandNo: string; waitMs: number
   window.scrollTo(0, document.documentElement.scrollHeight);
   await sleep(opts.waitMs);
   const after = collect();
-  const loading = Array.from(document.querySelectorAll(".uLoading, ._loading, [class*='loading']")).some((el) => (el as HTMLElement).offsetParent !== null);
+  // 로딩 표시: 밴드가 쓰는 좁은 클래스만, 그리고 화면 아래쪽(목록 끝 근처)에 실제로 보일 때만.
+  // 예전의 [class*='loading']은 이미지 지연 로딩 등 항상 보이는 요소까지 잡아 목록 끝을 영영 인정하지 않았다.
+  const vh = window.innerHeight || 800;
+  const loading = Array.from(document.querySelectorAll(".uLoading, ._loading, ._listLoading, .loadingWrap")).some((el) => {
+    const h = el as HTMLElement;
+    if (h.offsetParent === null) return false;
+    const r = h.getBoundingClientRect();
+    return r.height > 0 && r.top < vh + 200 && r.bottom > vh * 0.3;
+  });
+  const atBottom = window.scrollY + vh >= document.documentElement.scrollHeight - 80;
   return {
     links: Array.from(new Set([...before, ...after])),
     scrollHeight: document.documentElement.scrollHeight,
     loading,
+    atBottom,
     endMarker: false,
     loginRequired: /(^|\.)auth\.band\.us$/.test(location.hostname) || !!document.querySelector("input[type=password]"),
   };

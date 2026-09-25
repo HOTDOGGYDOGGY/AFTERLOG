@@ -44,6 +44,7 @@ export const ERROR_CODES = [
   "leaseRecovered",
   "outOfRange",
   "scopeMissing",
+  "frameGone",
   "other",
 ] as const;
 export const FIELD_KEYS = [
@@ -181,6 +182,8 @@ export interface DiagEvent {
   size?: SizeBucket;
   media?: (typeof MEDIA_KINDS)[number];
   progress?: boolean;
+  /** 목록 회차에서 로딩 표시가 보였는지 */
+  waiting?: boolean;
   end?: (typeof END_EVIDENCE)[number];
   attempt?: number;
 }

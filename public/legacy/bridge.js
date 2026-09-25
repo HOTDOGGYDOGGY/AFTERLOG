@@ -10,6 +10,12 @@
   var params = new URLSearchParams(location.search);
   var moduleId = params.get("moduleId") || "";
   var origin = location.origin;
+  // 파일을 직접 연 로컬 실행판(file://)은 출처가 'null'이라 비교할 수 없어 보낸 창(부모)만 확인한다
+  var isFile = location.protocol === "file:";
+  var target = isFile ? "*" : origin;
+  function sameOrigin(o) {
+    return o === origin || (isFile && (o === "null" || o === "file://"));
+  }
   var loading = false;
   var dirtyTimer = null;
 
@@ -18,7 +24,7 @@
     msg.protocol = PROTOCOL;
     msg.v = V;
     msg.moduleId = moduleId;
-    window.parent.postMessage(msg, origin);
+    window.parent.postMessage(msg, target);
   }
 
   function markDirty() {
@@ -80,7 +86,7 @@
   }
 
   window.addEventListener("message", async function (e) {
-    if (e.origin !== origin || e.source !== window.parent) return;
+    if (!sameOrigin(e.origin) || e.source !== window.parent) return;
     var d = e.data;
     if (!d || d.protocol !== PROTOCOL || d.moduleId !== moduleId || !d.requestId) return;
     var m = window.__rpbaModule;

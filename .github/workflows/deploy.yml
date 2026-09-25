@@ -33,6 +33,9 @@ jobs:
       # 수집 확장도 빌드해서 사이트에서 받을 수 있게 한다(dist/afterlog-collector.zip)
       - run: npm run build:collector
       - run: cd dist-collector && zip -qr ../dist/afterlog-collector.zip .
+      # 로컬 실행판(서버 없이 index.html을 파일로 여는 판): dist/afterlog-local.zip
+      - run: npm run build:local
+      - run: cd dist-local && zip -qr ../dist/afterlog-local.zip .
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

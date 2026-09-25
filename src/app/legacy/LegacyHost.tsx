@@ -67,7 +67,7 @@ export function LegacyHost({
       const requestId = crypto.randomUUID();
       return new Promise((resolve, reject) => {
         pending.current.set(requestId, { resolve, reject });
-        win.postMessage({ protocol: LEGACY_PROTOCOL, v: LEGACY_PROTOCOL_VERSION, moduleId: m.id, requestId, type, payload }, location.origin);
+        win.postMessage({ protocol: LEGACY_PROTOCOL, v: LEGACY_PROTOCOL_VERSION, moduleId: m.id, requestId, type, payload }, postTarget());
         window.setTimeout(() => {
           if (pending.current.delete(requestId)) reject(new Error("도구가 응답하지 않습니다."));
         }, 60_000);
@@ -114,7 +114,7 @@ export function LegacyHost({
   // 모듈 메시지 받기: 출처·보낸 창·규격 확인
   useEffect(() => {
     const on = (e: MessageEvent) => {
-      if (e.origin !== location.origin || e.source !== frame.current?.contentWindow) return;
+      if (!sameOrigin(e.origin) || e.source !== frame.current?.contentWindow) return;
       const d = e.data as ChildMsg;
       if (!d || d.protocol !== LEGACY_PROTOCOL || d.moduleId !== m.id) return;
       if (d.type === "ready") {
@@ -298,4 +298,13 @@ export function LegacyHost({
       <iframe ref={frame} className="legacy-frame" title={`${m.longLabel} (기존 편집기)`} src={src} />
     </div>
   );
+}
+
+/** 파일을 직접 연 로컬 실행판(file://)은 출처가 'null'로 나와 출처 비교가 안 되므로, 보낸 창(source) 확인만으로 받는다. */
+const isFile = location.protocol === "file:";
+function postTarget() {
+  return isFile ? "*" : location.origin;
+}
+function sameOrigin(o: string) {
+  return o === location.origin || (isFile && (o === "null" || o === "file://"));
 }

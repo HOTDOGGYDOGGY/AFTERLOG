@@ -8,6 +8,9 @@ import { MenuButton, type MenuItem } from "../../components/Menu";
 import { PLATFORMS, STATUS_LABEL, platformOf, type PlatformId } from "./platforms";
 import type { AppThemeMode } from "./useAppTheme";
 
+/** 받을 파일 위치. 로컬 실행판(file://)에는 이 파일들이 없으므로 배포 사이트에서 받는다 */
+export const SITE = location.protocol === "file:" ? "https://hotdoggydoggy.github.io/AFTERLOG/" : "./";
+
 export interface ShellSlots {
   status: HTMLElement | null;
   actions: HTMLElement | null;
@@ -76,7 +79,8 @@ export function Shell(p: ShellProps) {
             items={() => [
               ...(["dark", "light", "system"] as const).map((m) => ({ label: `화면 테마: ${THEME_LABEL[m]}`, checked: p.themeMode === m, onSelect: () => p.onThemeMode(m) })),
               { separator: true, label: "" },
-              { label: "수집 확장 받기 (밴드 여러 글 저장)", onSelect: () => window.open("./afterlog-collector.zip", "_blank", "noopener") },
+              { label: "수집 확장 받기 (밴드 여러 글 저장)", onSelect: () => window.open(`${SITE}afterlog-collector.zip`, "_blank", "noopener") },
+              { label: "로컬 실행판 받기 (서버 없이 파일로 열기)", onSelect: () => window.open(`${SITE}afterlog-local.zip`, "_blank", "noopener") },
             ]}
           >
             <Icon name="settings" size={18} />

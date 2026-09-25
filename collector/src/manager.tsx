@@ -7,7 +7,7 @@ import { createJob, DEFAULT_OPTIONS, Engine } from "./engine";
 import { exportJob } from "./exporter";
 import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnostics/recorder";
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
-import { parseBandUrl, parsePostUrlList } from "./urls";
+import { parseBandUrl, parsePostUrlList, postKey } from "./urls";
 import { blocksToPlainText, parseBandHtml } from "../../src/importers/band/html";
 import "./collector.css";
 
@@ -83,15 +83,33 @@ function Manager() {
     [runningHere, reload],
   );
 
-  // 팝업에서 바로 시작
+  // 팝업·밴드 화면의 저장 막대에서 바로 시작
   const autostarted = useRef(false);
   useEffect(() => {
+    if (autostarted.current) return;
     const id = params.get("job");
-    if (id && params.get("autostart") && !autostarted.current) {
+    if (id && params.get("autostart")) {
       autostarted.current = true;
       history.replaceState(null, "", `?job=${id}`);
       void start(id);
+      return;
     }
+    const kind = params.get("new");
+    if (kind !== "post" && kind !== "list") return;
+    autostarted.current = true;
+    void (async () => {
+      const created = await jobFromPage(kind, params.get("url") ?? "", Number(params.get("tabId")) || undefined);
+      if ("error" in created) {
+        history.replaceState(null, "", location.pathname);
+        setMessage({ kind: "error", text: created.error });
+        return;
+      }
+      history.replaceState(null, "", `?job=${created.id}`);
+      setSel(created.id);
+      setCreating(false);
+      await reload();
+      void start(created.id);
+    })();
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const job = jobs.find((j) => j.id === sel) ?? null;
@@ -161,6 +179,27 @@ function Manager() {
       </div>
     </div>
   );
+}
+
+/** 밴드 화면의 저장 막대(content.js)가 연 요청을 작업으로 만든다. 주소는 밴드 주소만 받는다. */
+export async function jobFromPage(kind: "post" | "list", rawUrl: string, tabId?: number): Promise<{ id: string } | { error: string }> {
+  const u = parseBandUrl(rawUrl);
+  if (!u) return { error: "밴드 주소가 아니라서 시작하지 않았습니다." };
+  if (kind === "post") {
+    if (u.kind !== "post") return { error: "글 화면에서만 '이 글 저장'을 쓸 수 있습니다." };
+    const job = await createJob({
+      scope: "current-post",
+      label: `글 ${u.postNo}`,
+      options: { ...DEFAULT_OPTIONS, skipCaptured: false },
+      bandNo: u.bandNo,
+      posts: [{ url: u.canonical, key: postKey(u.bandNo, u.postNo), tabId }],
+    });
+    return { id: job.id };
+  }
+  const member = u.kind === "member-list" && u.list === "post";
+  const list = member ? u.canonical : `${u.origin.replace("://www.", "://")}/band/${u.bandNo}/post`;
+  const job = await createJob({ scope: "list", label: member ? "멤버 작성글 목록" : "밴드 글 목록", options: DEFAULT_OPTIONS, bandNo: u.bandNo, lists: [list] });
+  return { id: job.id };
 }
 
 function NewJob({ onCreated }: { onCreated(id: string): void }) {

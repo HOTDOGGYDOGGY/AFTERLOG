@@ -24,8 +24,15 @@ npm run build      # dist/ 에 정적 사이트 생성 (아무 정적 호스팅�
 처음 한 번 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 바꿔야 합니다.
 빌드는 상대 경로(`base: "./"`)라 저장소 이름이 바뀌어도 그대로 동작합니다.
 
-`index.html`을 더블클릭해서는 앱이 동작하지 않습니다(개발 서버나 정적 호스팅 필요).
-더블클릭으로 열리는 것은 앱에서 **내보낸 감상용 HTML**입니다.
+### 서버 없이 파일로 열기(로컬 실행판)
+
+저장소의 `index.html`은 **소스용**이라 더블클릭하면 빈 화면입니다(TypeScript 원본을 가리키고, 브라우저는 파일로 연 페이지에서 분리된 모듈 스크립트를 막음).
+파일로 열어 쓰려면 로컬 실행판을 쓰세요.
+
+- 받기: 사이트 오른쪽 위 설정 → **로컬 실행판 받기**, 또는 https://hotdoggydoggy.github.io/AFTERLOG/afterlog-local.zip → 압축 풀기 → `index.html` 더블클릭
+- 직접 만들기: `npm run build:local` → `dist-local/index.html`
+- 앱 코드·스타일이 `index.html` 한 파일에 들어 있고, `legacy/` 폴더(카톡·카페·트위터 도구)는 옆에 그대로 두어야 합니다.
+- 자료는 그 브라우저의 파일 페이지 저장소에 따로 보관됩니다(사이트판과 공유되지 않음). 옮길 때는 **프로젝트 저장(.afterlog)** 으로.
 
 ## 사용 순서
 

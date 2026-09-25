@@ -4,7 +4,7 @@ import type { DiscoverRound } from "./page/discoverLinks";
 
 export class BrowserError extends Error {
   constructor(
-    public code: "navigationFailed" | "loadTimeout" | "loginRequired" | "tabClosed" | "other",
+    public code: "navigationFailed" | "loadTimeout" | "loginRequired" | "tabClosed" | "frameGone" | "other",
     message: string,
   ) {
     super(message);

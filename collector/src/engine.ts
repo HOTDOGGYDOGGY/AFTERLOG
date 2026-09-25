@@ -234,12 +234,24 @@ export class Engine {
     let emptyRounds = 0;
     let rounds = 0;
     let total = 0;
-    let end: "noProgress" | "maxRounds" = "noProgress";
+    let end: "noProgress" | "maxRounds" | "error" = "noProgress";
+    let broken: string | null = null;
     let order = (await cdb().tasks.where("jobId").equals(job.id).count()) + 1;
     for (;;) {
       if (this.stopRequested) break;
       rounds++;
-      const r = await this.deps.browser.discoverRound(b.bandNo);
+      let r: Awaited<ReturnType<CollectorBrowser["discoverRound"]>>;
+      try {
+        r = await this.deps.browser.discoverRound(b.bandNo);
+      } catch (e) {
+        // 목록 읽기가 중간에 끊겨도 이미 찾은 글은 수집으로 넘긴다(목록을 처음부터 다시 돌지 않음)
+        if (total > 0 && !(e instanceof BrowserError && e.code === "loginRequired")) {
+          broken = (e as Error).message || "목록 읽기가 끊겼습니다.";
+          end = "error";
+          break;
+        }
+        throw e;
+      }
       if (r.loginRequired) return { ok: false, code: "loginRequired", text: "밴드에 로그인해야 합니다. 로그인한 뒤 이어받기를 누르세요.", retry: false, stopJob: "needsUser" };
       let added = 0;
       // 발견 즉시 저장(가상화 목록에서 사라져도 남도록, T02)
@@ -269,12 +281,13 @@ export class Engine {
         }
       });
       total += added;
-      await diag.event(task.id, { stage: "listRound", state: "ok", progress: added > 0, count: countBucket(added) });
+      await diag.event(task.id, { stage: "listRound", state: "ok", progress: added > 0, count: countBucket(added), waiting: r.loading });
       await cdb().tasks.update(task.id, { result: { coverage: "unknown", found: total, evidence: `${rounds}회 스크롤` }, leaseUntil: this.now() + LIMITS.leaseMs });
       this.emit(job.id);
-      if (added === 0 && !r.loading) emptyRounds++;
+      // 끝 판단: 새 글이 연속으로 없으면 끝. 로딩 표시가 보이면 조금 더 기다리되, 계속 보여도 상한을 넘기면 끝으로 본다
+      if (added === 0) emptyRounds++;
       else emptyRounds = 0;
-      if (emptyRounds >= LIMITS.emptyRoundsToStop) break;
+      if (emptyRounds >= (r.loading ? LIMITS.emptyRoundsWhileLoading : LIMITS.emptyRoundsToStop)) break;
       if (rounds >= LIMITS.maxListRounds) {
         end = "maxRounds";
         break;
@@ -282,12 +295,14 @@ export class Engine {
       await this.sleep(MIN_DELAY_MS + this.random() * MIN_DELAY_MS);
     }
     // 명시적인 끝 표시를 확인한 적이 없으므로 '끝 확인 불가'로 남긴다(8.2)
-    const coverage = end === "maxRounds" ? "partial" : "unknown";
+    const coverage = end === "noProgress" ? "unknown" : "partial";
     const evidence =
       end === "maxRounds"
         ? `스크롤 ${rounds}회 상한에서 멈춤`
-        : `스크롤 ${rounds}회, 마지막 ${LIMITS.emptyRoundsToStop}회 동안 새 글 없음(명시적인 끝 표시는 확인하지 못함)`;
-    await diag.event(task.id, { stage: "listEnd", state: coverage === "partial" ? "partial" : "unknown", end, count: countBucket(total) });
+        : end === "error"
+          ? `스크롤 ${rounds}회 뒤 목록 읽기가 끊겨 찾은 ${total}개부터 수집(${broken}). 목록을 다시 수집하면 빠진 글을 더 찾을 수 있습니다`
+          : `스크롤 ${rounds}회, 마지막 ${emptyRounds}회 동안 새 글 없음(명시적인 끝 표시는 확인하지 못함)`;
+    await diag.event(task.id, { stage: "listEnd", state: coverage === "partial" ? "partial" : "unknown", end, count: countBucket(total), ...(end === "error" ? { code: "frameGone" as const } : {}) });
     await cdb().tasks.update(task.id, { status: "succeeded", leaseUntil: 0, result: { coverage, found: total, evidence } });
     return { ok: true };
   }

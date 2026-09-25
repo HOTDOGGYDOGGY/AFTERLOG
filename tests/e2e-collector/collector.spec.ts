@@ -185,3 +185,41 @@ test("팝업: 지금 열린 글 저장(탭을 이동시키지 않음)", async ()
   await helper.close();
   await band.close();
 });
+
+test("밴드 화면 저장 막대: 글 화면·목록 화면에서 바로 저장", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/post/3`);
+  await expect(band.locator(".cPostCard")).toBeVisible();
+  const bar = band.locator("#afterlog-collector-bar");
+  await expect(bar.getByRole("button", { name: "이 글 저장" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "이 밴드 글 전체 저장" })).toBeVisible();
+  await band.screenshot({ path: `${OUT}/04-page-bar.png` });
+
+  // 이 글 저장: 지금 탭을 그대로 읽는다
+  let mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 글 저장" }).click();
+  let mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 60_000);
+  await expect(stat(mgr, "확보").first()).toHaveText("1");
+  expect(band.url()).toBe(`${BAND}/post/3`);
+  await mgr.close();
+
+  // 목록 화면: '이 글 저장'은 없고 전체 저장만
+  await band.goto(BAND);
+  await expect(bar.getByRole("button", { name: "이 글 저장" })).toBeHidden();
+  mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 밴드 글 전체 저장" }).click();
+  mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await expect(mgr.locator(".job-head")).toContainText("밴드 글 목록");
+  await expect(mgr.locator(".job-head .badge")).toHaveText(/수집 중|끝남/, { timeout: 30_000 });
+  await mgr.close();
+
+  // 숨기기 → 작은 버튼으로 다시 열기
+  await bar.getByRole("button", { name: "저장 막대 숨기기" }).click();
+  await expect(bar.getByRole("button", { name: "이 밴드 글 전체 저장" })).toBeHidden();
+  await bar.getByRole("button", { name: "AFTERLOG 저장" }).click();
+  await expect(bar.getByRole("button", { name: "이 밴드 글 전체 저장" })).toBeVisible();
+  await band.close();
+});

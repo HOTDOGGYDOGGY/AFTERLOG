@@ -1,3 +1,4 @@
+import { SITE } from "../shell/Shell";
 import { useState } from "react";
 import { analyzeFiles, commitImport, type PendingImport } from "../../importers/importFiles";
 import { blocksToPlainText } from "../../importers/band/html";
@@ -222,7 +223,7 @@ export function ImportPanel({
           </p>
           <ol className="small">
             <li>
-              <a href="./afterlog-collector.zip" download>
+              <a href={`${SITE}afterlog-collector.zip`} download>
                 수집 확장 받기 (afterlog-collector.zip)
               </a>{" "}
               → 압축 풀기
@@ -273,7 +274,7 @@ export function ImportPanel({
         </p>
         <ol className="small">
           <li>
-            <a href="./afterlog-collector.zip" download>
+            <a href={`${SITE}afterlog-collector.zip`} download>
               수집 확장 받기 (afterlog-collector.zip)
             </a>{" "}
             → 압축 풀기

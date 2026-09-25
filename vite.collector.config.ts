@@ -24,6 +24,8 @@ function manifest(): Plugin {
         action: { default_popup: "popup.html", default_title: "AFTERLOG · 밴드 기록 저장", default_icon: { 16: "icon16.png", 32: "icon32.png" } },
         icons: { 16: "icon16.png", 32: "icon32.png", 48: "icon48.png", 128: "icon128.png" },
         background: { service_worker: "background.js" },
+        // 밴드 화면 왼쪽 아래 저장 막대(이 글 저장 · 이 밴드 글 전체 저장). 페이지 내용은 읽지 않는다
+        content_scripts: [{ matches: origins.map((o) => `${o}/*`), js: ["content.js"], run_at: "document_idle" }],
         // scripting: 밴드 화면에서 게시글 영역을 읽기 위해. unlimitedStorage: 수집한 글·이미지를 브라우저에 보관하기 위해.
         permissions: ["scripting", "unlimitedStorage"],
         // 밴드 화면과 밴드 이미지 서버만. 모든 사이트 접근은 요청하지 않는다.

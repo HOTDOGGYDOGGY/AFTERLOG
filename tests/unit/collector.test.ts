@@ -73,7 +73,7 @@ class FakeBrowser implements CollectorBrowser {
   }
   async discoverRound() {
     const links = this.list.slice(0, ++this.round).flat();
-    return { links, scrollHeight: 1000, loading: false, endMarker: false, loginRequired: false };
+    return { links, scrollHeight: 1000, loading: false, atBottom: true, endMarker: false, loginRequired: false };
   }
   async sampleStructure() {
     return { n: 1, tag: "div", c: [{ n: 2, tag: "article", probes: ["postCard"], text: true }] };

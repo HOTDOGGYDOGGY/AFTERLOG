@@ -27,6 +27,8 @@ export class ChromeBrowser implements CollectorBrowser {
     this.windowId = w?.id ?? null;
     this.tabId = w?.tabs?.[0]?.id ?? null;
     if (this.tabId === null) throw new BrowserError("other", "수집용 창을 열지 못했습니다.");
+    // 오래 뒤에 있는 창이라 크롬의 메모리 절약 기능이 탭을 비우면 읽던 페이지가 사라진다(Frame … was removed)
+    await chrome.tabs.update(this.tabId, { autoDiscardable: false }).catch(() => undefined);
     return this.tabId;
   }
 
@@ -57,10 +59,44 @@ export class ChromeBrowser implements CollectorBrowser {
     }
   }
 
+  /**
+   * 페이지에서 함수 실행. 크롬이 탭을 비우거나 페이지가 새로 고쳐져 프레임이 사라지면(Frame with ID 0 was removed 등)
+   * 페이지가 다시 준비될 때까지 기다렸다가 두 번까지 다시 시도한다.
+   */
   private async exec<A extends unknown[], R>(tabId: number, func: (...args: A) => Promise<R> | R, args: A): Promise<R> {
-    const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: func as never, args: args as never, world: "ISOLATED" });
-    if (!res) throw new BrowserError("other", "페이지에서 스크립트를 실행하지 못했습니다.");
-    return res.result as R;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: func as never, args: args as never, world: "ISOLATED" });
+        if (!res) throw new BrowserError("other", "페이지에서 스크립트를 실행하지 못했습니다.");
+        return res.result as R;
+      } catch (e) {
+        const msg = (e as Error)?.message ?? "";
+        const gone = /Frame with ID \d+ was removed|No frame with id|frame was removed|was discarded|The tab was closed|No tab with id|Cannot access contents of the page/i.test(msg);
+        if (!gone) throw e;
+        if (attempt >= 2)
+          throw new BrowserError("frameGone", "수집 창의 페이지가 사라졌습니다(크롬이 탭을 정리했거나 페이지가 새로 고쳐짐). 이어받기를 누르면 이어서 합니다.");
+        await this.waitReady(tabId);
+      }
+    }
+  }
+
+  /** 탭이 다시 불러와질 때까지(최대 페이지 제한 시간) */
+  private async waitReady(tabId: number) {
+    const deadline = Date.now() + LIMITS.pageTimeoutMs;
+    await new Promise((r) => setTimeout(r, 800));
+    for (;;) {
+      let tab: chrome.tabs.Tab;
+      try {
+        tab = await chrome.tabs.get(tabId);
+      } catch {
+        this.tabId = null;
+        throw new BrowserError("tabClosed", "수집용 창이 닫혔습니다. 이어받기를 누르면 다시 엽니다.");
+      }
+      if (tab.discarded) await chrome.tabs.reload(tabId).catch(() => undefined);
+      else if (tab.status === "complete") return;
+      if (Date.now() > deadline) throw new BrowserError("loadTimeout", "페이지가 제시간에 다시 열리지 않았습니다.");
+      await new Promise((r) => setTimeout(r, 300));
+    }
   }
 
   async extractPost(target: { url?: string; tabId?: number }) {
