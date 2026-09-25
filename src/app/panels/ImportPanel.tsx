@@ -1,0 +1,227 @@
+import { useState } from "react";
+import { analyzeFiles, commitImport, type PendingImport } from "../../importers/importFiles";
+import { blocksToPlainText } from "../../importers/band/html";
+import { createProject } from "../../storage/repo";
+import { describeStorageError } from "../../storage/db";
+import type { DocumentData } from "../../domain/types";
+import type { LineInfo } from "../../importers/band/text";
+import { pickFiles } from "../download";
+
+const FORMAT_LABEL = { "band-post": "글과 댓글", "band-member-comments": "댓글 모음" } as const;
+const KIND_LABEL = { "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
+const LINE_LABEL: Record<LineInfo["cls"], string> = { content: "내용", meta: "정보", ui: "UI", blank: "", unclassified: "미분류" };
+
+/** 텍스트 입력의 줄별 분류. 사라진 줄이 없는지 확인할 수 있게 전부 보여준다. */
+function LineReview({ lines }: { lines: LineInfo[] }) {
+  const unc = lines.filter((l) => l.cls === "unclassified").length;
+  return (
+    <details className="line-review">
+      <summary className="small">
+        원문 줄 분류 보기 ({lines.length}줄{unc ? ` · 미분류 ${unc}` : ""})
+      </summary>
+      <ol className="line-list">
+        {lines.map((l) => (
+          <li key={l.n} className={`ln-${l.cls}`} title={l.note}>
+            <span className="ln-n">{l.n}</span>
+            <span className="ln-cls">{LINE_LABEL[l.cls]}</span>
+            <span className="ln-t">{l.text || " "}</span>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+export function ImportPanel({
+  projectId,
+  onImported,
+  compact,
+}: {
+  projectId: string | null;
+  onImported(projectId: string, docs: DocumentData[]): void;
+  compact?: boolean;
+}) {
+  const [pending, setPending] = useState<PendingImport | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState(false);
+  const [paste, setPaste] = useState("");
+
+  const analyze = async (files: File[], pasted?: string) => {
+    if (!files.length && !pasted?.trim()) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const p = await analyzeFiles(files, projectId, pasted);
+      setPending(p);
+      // 게시글이 하나면 그것을 기본 선택. 여러 개면 임의로 고르지 않고 사용자가 고르게 한다.
+      const posts = p.parse.documents.map((d, i) => (d.format === "band-post" ? i : -1)).filter((i) => i >= 0);
+      if (posts.length === 1) setSelected(posts);
+      else if (posts.length > 1) setSelected([]);
+      else setSelected(p.parse.documents.length === 1 ? [0] : []);
+      setPaste("");
+    } catch (e) {
+      setError((e as Error).message);
+      setPending(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doImport = async () => {
+    if (!pending) return;
+    setBusy(true);
+    try {
+      let pid = projectId;
+      if (!pid) {
+        const title = pending.parse.bandName ?? pending.parse.documents[selected[0]]?.title ?? "새 프로젝트";
+        pid = (await createProject(title)).id;
+      }
+      const docs = await commitImport(pid, pending, selected);
+      setPending(null);
+      onImported(pid, docs);
+    } catch (e) {
+      setError(describeStorageError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (pending) {
+    const { parse } = pending;
+    return (
+      <div className="import-review">
+        <div className="panel-head">
+          <strong>가져오기 검토</strong>
+          <button type="button" className="ui-link" onClick={() => setPending(null)}>
+            취소
+          </button>
+        </div>
+        <p className="small">
+          <span className="tag">{KIND_LABEL[pending.sourceKind]}</span> <b>{pending.fileName}</b>
+          {parse.bandName ? ` · ${parse.bandName}` : ""}
+        </p>
+        {pending.sourceUrl ? <p className="small muted ellipsis">원래 주소: {pending.sourceUrl}</p> : null}
+        {parse.documents.filter((d) => d.format === "band-post").length > 1 ? (
+          <p className="notice warn">게시글이 여러 개 들어 있습니다. 가져올 게시글을 직접 골라 주세요.</p>
+        ) : null}
+        {pending.duplicateOf ? (
+          <p className="notice warn">이 프로젝트에 같은 원문을 이미 가져온 적이 있습니다({new Date(pending.duplicateOf.importedAt).toLocaleString()}). 가져오면 새 문서로 추가되고 기존 문서는 그대로 남습니다.</p>
+        ) : null}
+        {parse.notes.map((n, i) => (
+          <p key={i} className="notice warn">
+            {n}
+          </p>
+        ))}
+        {pending.warnings.map((n, i) => (
+          <p key={i} className="notice">
+            {n}
+          </p>
+        ))}
+        {parse.documents.map((d, i) => {
+          const comments = d.entries.filter((e) => e.kind === "comment").length;
+          const unclassified = d.entries.filter((e) => e.kind === "unclassified").length;
+          const replies = d.entries.filter((e) => e.kind === "comment" && e.parentTempId !== null && e.parentTempId !== d.entries[0]?.tempId).length;
+          const first = d.entries[0];
+          return (
+            <label key={i} className={`import-doc${selected.includes(i) ? " is-selected" : ""}`}>
+              <input
+                type="checkbox"
+                checked={selected.includes(i)}
+                onChange={(e) => setSelected((s) => (e.target.checked ? [...s, i].sort() : s.filter((x) => x !== i)))}
+              />
+              <div>
+                <div className="import-doc-title">
+                  <span className="tag">{FORMAT_LABEL[d.format]}</span> {d.title}
+                </div>
+                <div className="small muted">
+                  {d.format === "band-post" ? `게시글 1 · 댓글 ${comments - replies} · 답글 ${replies}` : `댓글 ${comments}`} · 인물 {d.identities.length}
+                  {unclassified ? ` · 미분류 ${unclassified}` : ""} · 판정 {d.confidence === "high" ? "확실" : "검토 필요"}
+                </div>
+                {first ? <div className="small ellipsis">{blocksToPlainText(first.blocks).slice(0, 80)}</div> : null}
+                {d.issues.length ? (
+                  <ul className="issue-list small">
+                    {d.issues.map((iss, k) => (
+                      <li key={k}>{iss.message}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <details className="small muted">
+                  <summary>판정 근거</summary>
+                  <ul>
+                    {d.evidence.map((ev, k) => (
+                      <li key={k}>{ev}</li>
+                    ))}
+                  </ul>
+                </details>
+              </div>
+            </label>
+          );
+        })}
+        <p className="small muted">
+          이미지 파일 {parse.imageRefs.length - pending.missingImages.length}/{parse.imageRefs.length}개 확보
+          {pending.linkOnlyImages.length ? ` · ${pending.linkOnlyImages.length}개는 링크만 있습니다(자동으로 내려받지 않음)` : ""}
+          {pending.missingImages.length ? ` · 파일이 없는 이미지는 '미확보'로 남고 나중에 연결할 수 있습니다.` : ""}
+        </p>
+        {pending.lines ? <LineReview lines={pending.lines} /> : null}
+        {error ? <p className="notice error">{error}</p> : null}
+        <button type="button" className="ui-btn ui-btn-primary" disabled={busy || !selected.length} onClick={doImport}>
+          {busy ? "가져오는 중…" : `선택한 ${selected.length}개 가져오기`}
+        </button>
+        <p className="small muted">원본 HTML은 프로젝트 안에 그대로 보관됩니다.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`import-panel${compact ? " is-compact" : ""}`}>
+      <div
+        className={`dropzone${over ? " is-over" : ""}`}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          void analyze(Array.from(e.dataTransfer.files));
+        }}
+      >
+        <strong>밴드 기록 가져오기</strong>
+        <p className="small">
+          밴드에서 게시글을 연 상태로 <b>Ctrl+S (다른 이름으로 저장 → 웹페이지, 전체)</b>한 파일을 넣어 주세요.
+          <br />
+          .html 파일과 같이 생긴 <b>_files 폴더의 이미지</b>를 함께 선택하거나, 둘을 묶은 <b>.zip</b>을 넣으면 프로필·이미지까지 가져옵니다. 게시글 영역 HTML을 복사한 .txt나 화면 텍스트를 복사한 .txt도 됩니다.
+        </p>
+        <button type="button" className="ui-btn ui-btn-primary" disabled={busy} onClick={async () => analyze(await pickFiles(".html,.htm,.zip,.txt,image/*"))}>
+          {busy ? "분석 중…" : "파일 선택"}
+        </button>
+        <p className="small muted">파일은 이 브라우저 안에서만 처리되며 어디로도 전송되지 않습니다.</p>
+      </div>
+      <div className="paste-box">
+        <label className="field">
+          <span>또는 붙여넣기 (게시글 영역 HTML 또는 화면에서 복사한 글)</span>
+          <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={compact ? 3 : 5} placeholder="여기에 붙여넣고 '분석'을 누르세요" />
+        </label>
+        <button type="button" className="ui-btn" disabled={busy || !paste.trim()} onClick={() => analyze([], paste)}>
+          분석
+        </button>
+      </div>
+      {error ? <p className="notice error">{error}</p> : null}
+      <details className="small muted support">
+        <summary>지원 범위</summary>
+        <ul>
+          <li>밴드 글과 댓글 — 저장 페이지(HTML·ZIP): 지원, 실제 샘플로 검증</li>
+          <li>밴드 글과 댓글 — 게시글 영역 HTML 조각(TXT·붙여넣기): 지원, 이미지는 링크만</li>
+          <li>밴드 글과 댓글 — 화면 텍스트 복사: 지원(대체 경로). 답글 관계·정확한 시각·사진 없음</li>
+          <li>멤버 댓글 모음(저장 페이지 뒤쪽 목록): 지원, 전체 목록인지는 확인 필요</li>
+          <li>게시글 모음·프로필·스토리·표정 상세·밴드 채팅: 아직 지원하지 않음 (실제 샘플 필요)</li>
+          <li>카카오톡·네이버카페·트위터: 이후 단계</li>
+        </ul>
+      </details>
+    </div>
+  );
+}

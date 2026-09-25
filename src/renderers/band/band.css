@@ -1,0 +1,214 @@
+/* 밴드형 출력 스킨. 편집기 UI와 분리되어 있으며 HTML 내보내기에 그대로 포함된다. */
+.al-band {
+  --al-bg: #ffffff;
+  --al-card: #ffffff;
+  --al-text: #222222;
+  --al-sub: #8a8a8a;
+  --al-line: #ececec;
+  --al-soft: #f6f6f6;
+  --al-mention: #1e9e5a;
+  --al-accent: #20c05c;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--al-width, 640px);
+  margin: 0 auto;
+  background: var(--al-bg);
+  color: var(--al-text);
+  font-size: var(--al-size-base, 14px);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.al-band *,
+.al-band *::before,
+.al-band *::after {
+  box-sizing: border-box;
+}
+.al-band.al-theme-dark {
+  --al-bg: #1b1c1e;
+  --al-card: #232427;
+  --al-text: #e7e7e7;
+  --al-sub: #9a9ca1;
+  --al-line: #33353a;
+  --al-soft: #2b2d31;
+  --al-mention: #52d18b;
+}
+
+.al-band p {
+  margin: 0;
+}
+.al-text {
+  white-space: pre-wrap;
+}
+
+.al-post {
+  background: var(--al-card);
+  border-bottom: 1px solid var(--al-line);
+}
+.al-post-main {
+  padding: 18px 20px 0;
+}
+.al-post-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.al-post-meta {
+  min-width: 0;
+  flex: 1;
+}
+.al-name-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  min-width: 0;
+}
+.al-name {
+  font-size: var(--al-size-name, 15px);
+  font-weight: 700;
+}
+.al-desc {
+  font-size: var(--al-size-desc, 12px);
+  color: var(--al-sub);
+}
+.al-sub {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--al-sub);
+}
+.al-post-body {
+  padding: 14px 0 16px;
+  font-size: var(--al-size-body, 15px);
+}
+.al-counts {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--al-line);
+  font-size: 13px;
+  color: var(--al-sub);
+}
+
+.al-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--al-soft);
+  color: var(--al-sub);
+  font-weight: 700;
+  border: 1px solid var(--al-line);
+}
+
+.al-comments {
+  padding: 4px 20px 12px;
+  background: var(--al-soft);
+  border-top: 1px solid var(--al-line);
+}
+.al-comment {
+  display: flex;
+  gap: 10px;
+  padding: 12px 0;
+}
+.al-thread + .al-thread > .al-comment,
+.al-comments > .al-thread + .al-thread {
+  border-top: 1px solid var(--al-line);
+}
+.al-comment-main {
+  flex: 1;
+  min-width: 0;
+}
+.al-comment-body {
+  font-size: var(--al-size-comment, 14px);
+  margin: 2px 0 4px;
+}
+.al-replies {
+  padding-left: 44px;
+}
+.al-replies .al-comment {
+  padding: 8px 0;
+}
+.al-replies .al-thread + .al-thread > .al-comment {
+  border-top: 0;
+}
+.al-mention {
+  color: var(--al-mention);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.al-image {
+  margin: 10px 0;
+}
+.al-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.al-image-missing {
+  margin: 10px 0;
+  padding: 18px 12px;
+  border: 1px dashed var(--al-line);
+  border-radius: 4px;
+  color: var(--al-sub);
+  font-size: 12px;
+  text-align: center;
+}
+.al-unclassified {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px dashed #d9a400;
+  border-radius: 4px;
+}
+.al-unclassified-label {
+  display: block;
+  font-size: 11px;
+  color: #b07d00;
+}
+.al-hidden-placeholder {
+  color: var(--al-sub);
+  font-size: 12px;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.al-mc-card {
+  display: block;
+  padding: 16px 20px;
+  background: var(--al-card);
+  border-bottom: 1px solid var(--al-line);
+}
+.al-mc-card .al-name-row {
+  align-items: center;
+  gap: 8px;
+}
+.al-excerpt {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--al-soft);
+  border-left: 3px solid var(--al-line);
+  color: var(--al-sub);
+  font-size: 13px;
+}
+.al-excerpt-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@media (max-width: 480px) {
+  .al-post-main,
+  .al-comments,
+  .al-mc-card {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .al-replies {
+    padding-left: 24px;
+  }
+}
