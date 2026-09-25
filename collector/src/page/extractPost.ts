@@ -1,6 +1,6 @@
 // 밴드 탭 안에서 실행되는 함수(chrome.scripting.executeScript의 func).
 // 주의: 직렬화되어 페이지에 주입되므로 바깥 변수·import를 쓰면 안 된다. 자체 완결형으로 유지할 것.
-// 하는 일: 게시글 상세가 안정될 때까지 기다린 뒤 게시글 카드(cPostCard)만 복제해서 돌려준다.
+// 하는 일: 게시글 상세가 안정될 때까지 기다린 뒤 게시글 카드(cPostCard, 없으면 작성자 영역으로 찾은 게시글 범위)만 복제해서 돌려준다.
 // 쓰기 동작(표정·댓글·클릭)은 하지 않는다. 로그인 정보·배경 화면은 복사하지 않는다.
 
 export interface PostExtraction {
@@ -56,8 +56,30 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
   const targetNo = (location.pathname.match(/\/post\/(\d+)/) ?? [])[1] ?? null;
   const linksTo = (c: Element, sel: string) =>
     Array.from(c.querySelectorAll(sel)).some((a) => new RegExp(`/post/${targetNo}(?:[/?#]|$)`).test(a.getAttribute("href") || ""));
+  // 게시글 범위 후보. 목록에서 레이어로 연 글은 .cPostCard 안에 있지만, 글 주소를 바로 연 화면에는 이 클래스가 없다(실사용 진단 0.1.2).
+  // 그때는 글 작성자 영역에서 위로 올라가며, 작성자 영역을 하나만 품고 댓글 영역(없으면 본문)까지 품는 가장 가까운 요소를 게시글 범위로 쓴다.
+  const WRITER = ".postWriterInfoWrap";
+  const scopeFromWriter = (w: Element): Element | null => {
+    let bodyHit: Element | null = null;
+    for (let a = w.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      if (a.querySelectorAll(WRITER).length !== 1) break;
+      if (a.querySelector(".dPostCommentMainView, .sCommentList")) return a;
+      if (!bodyHit && a.querySelector(".postBody, .txtBody")) bodyHit = a;
+    }
+    return bodyHit;
+  };
+  const candidates = (): Element[] => {
+    const cards = Array.from(document.querySelectorAll(".cPostCard"));
+    if (cards.length) return cards;
+    const out: Element[] = [];
+    for (const w of Array.from(document.querySelectorAll(WRITER))) {
+      const sc = scopeFromWriter(w);
+      if (sc && !out.includes(sc)) out.push(sc);
+    }
+    return out;
+  };
   const pick = (): { card: Element | null; count: number; ambiguous: boolean } => {
-    const all = Array.from(document.querySelectorAll(".cPostCard"));
+    const all = candidates();
     if (all.length <= 1) return { card: all[0] ?? null, count: all.length, ambiguous: false };
     if (targetNo) {
       // 작성자 영역의 글 주소가 가장 강한 근거, 없으면 카드 안 아무 글 주소
@@ -94,7 +116,8 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
       if (sig !== lastSig) {
         lastSig = sig;
         stableSince = Date.now();
-      } else if (!loading && Date.now() - stableSince >= opts.stableMs) {
+      } else if (Date.now() - stableSince >= (loading ? Math.max(opts.stableMs * 4, 6000) : opts.stableMs)) {
+        // 로딩 표시가 계속 떠 있어도 내용이 한참 그대로면 더 오지 않는 것으로 본다(댓글 수가 모자라면 '일부'로 남는다)
         ready = true;
         break;
       }
@@ -122,6 +145,8 @@ export async function extractPostInPage(opts: { timeoutMs: number; stableMs: num
     };
 
   const clone = card.cloneNode(true) as Element;
+  // 해석기는 .cPostCard를 게시글 범위로 찾으므로, 작성자 영역으로 찾은 범위에도 같은 표시를 붙인다
+  clone.classList.add("cPostCard");
   // 이미지 주소는 절대 주소로(요소를 지우기 전에, 원본과 순서가 같을 때 맞춘다)
   const origImgs = Array.from(card.querySelectorAll("img"));
   Array.from(clone.querySelectorAll("img")).forEach((img, i) => {

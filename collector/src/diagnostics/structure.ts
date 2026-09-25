@@ -13,7 +13,21 @@ export function sampleStructureInPage(args: {
 }) {
   // 글 추출과 같은 규칙으로 대상 카드 하나를 고른다(C06). 여러 개인데 못 고르면 범위 없음
   const targetNo = ((globalThis.location?.pathname ?? "").match(/\/post\/(\d+)/) ?? [])[1] ?? null;
-  const cards = Array.from(document.querySelectorAll(".cPostCard"));
+  // 글 주소를 바로 연 화면에는 .cPostCard가 없다: 작성자 영역을 하나만 품고 댓글(없으면 본문)까지 품는 가장 가까운 요소
+  const scopeFromWriter = (w: Element): Element | null => {
+    let bodyHit: Element | null = null;
+    for (let a = w.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      if (a.querySelectorAll(".postWriterInfoWrap").length !== 1) break;
+      if (a.querySelector(".dPostCommentMainView, .sCommentList")) return a;
+      if (!bodyHit && a.querySelector(".postBody, .txtBody")) bodyHit = a;
+    }
+    return bodyHit;
+  };
+  let cards = Array.from(document.querySelectorAll(".cPostCard"));
+  if (!cards.length)
+    cards = Array.from(document.querySelectorAll(".postWriterInfoWrap"))
+      .map(scopeFromWriter)
+      .filter((c, i, a): c is Element => !!c && a.indexOf(c) === i);
   let root: Element | null = cards.length === 1 ? cards[0] : null;
   if (!root && cards.length > 1 && targetNo) {
     const re = new RegExp(`/post/${targetNo}(?:[/?#]|$)`);

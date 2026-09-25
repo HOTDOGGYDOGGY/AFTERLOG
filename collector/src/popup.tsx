@@ -19,7 +19,7 @@ function Popup() {
       if (!tab?.id || !url) return setView({ kind: "not-band" });
       let hasPostCard = false;
       try {
-        const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.querySelectorAll(".cPostCard").length });
+        const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.querySelectorAll(".cPostCard").length || document.querySelectorAll(".postWriterInfoWrap").length });
         hasPostCard = (r?.result as number) === 1;
       } catch {
         /* 권한 없는 화면 */

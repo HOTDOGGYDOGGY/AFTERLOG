@@ -19,6 +19,9 @@ function postCard(n) {
   html = html.replace("2026년 3월 1일 오후 11:50", `2026년 3월 ${(n % 28) + 1}일 오후 11:50`);
   html = html.replace('<span class="count">10</span>', `<span class="count">${n === 7 ? 14 : 8}</span>`);
   if (n === 5) html = html.replace("post_photo_2.png", "broken.png");
+  // 실제 밴드에서 글 주소를 바로 열면 .cPostCard가 없다(진단 0.1.2). 일부 글은 그 모양으로 준다
+  if (n % 4 === 2)
+    html = `<div class="postDetailWrap">${html.replace('<article class="cPostCard _postCard">', '<section class="detailPost">').replace(/<\/article>$/, "</section>")}</div><aside class="bandSide"><p class="txtBody">밴드 소개 요약</p></aside>`;
   return html;
 }
 

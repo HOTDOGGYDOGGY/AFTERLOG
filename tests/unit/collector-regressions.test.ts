@@ -256,3 +256,54 @@ describe("실사용 진단(목록 단계에서 멈춤) 회귀", () => {
     expect(tasks.filter((t) => t.kind === "post" && t.status !== "pending")).toHaveLength(2);
   });
 });
+
+describe("실사용 진단(글 주소를 바로 연 화면에 .cPostCard 없음) 회귀", () => {
+  // 진단 0.1.2: 작성자·본문·시간·댓글 목록은 1개씩 있는데 postCard 0 → '게시글을 찾지 못했습니다'
+  const direct = (no: number, extra = "") =>
+    `<html><body><div id="header"><a href="/band/1/post">목록</a></div><div id="content">${extra}<div class="postDetail">${postHtml(no)
+      .replace(/^[\s\S]*?<article class="cPostCard _postCard">/, "<section class=\"detailBox\">")
+      .replace(/<\/article>[\s\S]*$/, "</section>")}</div></div><aside class="bandSide"><p class="txtBody">공지 요약</p></aside></body></html>`;
+
+  it("작성자 영역으로 게시글 범위를 찾아 저장하고, 해석 결과가 카드 저장본과 같다", async () => {
+    const url = "https://band.us/band/1/post/1";
+    const html = direct(1);
+    expect(html).not.toContain("cPostCard");
+    const r = await withDom(html, url, () => extractPostInPage({ timeoutMs: 2000, stableMs: 0, probes: POST_PROBES }));
+    expect(r.ok).toBe(true);
+    expect(r.html).not.toContain("공지 요약");
+    expect(r.html).not.toContain("목록</a>");
+    const viaCard = await withDom(postHtml(1), url, () => extractPostInPage({ timeoutMs: 2000, stableMs: 0, probes: [] }));
+    const { parseBandHtml } = await import("../../src/importers/band/html");
+    const a = parseBandHtml(r.html!).documents[0];
+    const b = parseBandHtml(viaCard.html!).documents[0];
+    expect(a.entries.length).toBeGreaterThan(3);
+    expect(a.entries.map((e) => e.blocks)).toEqual(b.entries.map((e) => e.blocks));
+    expect(r.commentsFound).toBe(viaCard.commentsFound);
+  });
+
+  it("엔진: 바로 연 화면도 카드 화면과 같은 결과로 확보된다(실패 아님)", async () => {
+    const run = async (make: (n: number) => string) => {
+      const pages = Object.fromEntries([1, 2].map((n) => [`https://band.us/band/1/post/${n}`, make(n)]));
+      const job = await createJob({ label: "r", scope: "post-urls", bandNo: "1", options: { ...DEFAULT_OPTIONS, includeImages: false, skipCaptured: false }, posts: [1, 2].map((n) => ({ key: `band:1:post:${n}`, url: `https://band.us/band/1/post/${n}` })) });
+      expect(await new Engine({ browser: browserFor(pages), ...clock() }).run(job.id)).toBe("done");
+      return (await cdb().tasks.where("jobId").equals(job.id).toArray()).map((t) => [t.status, t.errorCode]);
+    };
+    const viaDirect = await run(direct);
+    expect(viaDirect.every(([s]) => s === "succeeded" || s === "partial")).toBe(true);
+    expect(viaDirect).toEqual(await run(postHtml));
+  });
+
+  it("작성자 영역이 둘인데 주소와 맞는 것을 못 고르면 추측하지 않는다", async () => {
+    const two = direct(1).replace('<div class="postDetail">', `<div class="postDetail">${direct(2).match(/<section class="detailBox">[\s\S]*<\/section>/)![0]}</div><div class="postDetail">`);
+    const r = await withDom(two, "https://band.us/band/1/post/99", () => extractPostInPage({ timeoutMs: 300, stableMs: 0, probes: [] }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("multiple");
+  });
+
+  it("진단 구조 표본도 같은 범위를 쓴다(범위 없음이 아님)", async () => {
+    const args = { scope: "postCard" as const, probes: POST_PROBES, tags: [...STRUCT_TAGS], roles: [...STRUCT_ROLES], maxDepth: 8, maxNodes: 150 };
+    const r = await withDom(direct(1), "https://band.us/band/1/post/1", async () => sampleStructureInPage(args));
+    expect(r).not.toBeNull();
+    expect(!!r && "scopeMissing" in r).toBe(false);
+  });
+});
