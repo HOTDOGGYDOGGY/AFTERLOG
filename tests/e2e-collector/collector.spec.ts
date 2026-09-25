@@ -111,6 +111,19 @@ test("목록에서 글 찾기 → 순차 수집 → 일부·실패 보고 → .a
   await (await dl2).saveAs(filePath);
   await expect(p.locator(".notice.ok")).toContainText("글 21개");
 
+  // 확장에서 보관 파일 가져오기: 바로 수집하지 않고 내용과 '부족한 자료 이어 수집'(댓글 모자란 글 + 실패한 글)을 보여 준다
+  const jobsBefore = await p.locator(".mgr-jobs li").count();
+  await p.locator('input[aria-label="보관 파일 가져오기"]').setInputFiles(filePath);
+  await expect(p.locator(".archive-view")).toContainText("글 21개");
+  await expect(p.getByRole("button", { name: /부족한 자료 이어 수집/ })).toContainText("글 2");
+  await expect(p.locator(".mgr-jobs li")).toHaveCount(jobsBefore);
+  const docP = ctx.waitForEvent("page");
+  await p.locator(".archive-docs .ui-link").first().click();
+  const docView = await docP;
+  await expect(docView.locator("body")).toContainText("의 첫 줄 대사.");
+  await docView.close();
+  await p.locator(".archive-view").getByRole("button", { name: "닫기" }).click();
+
   // 웹 앱에서 열기: 여러 글이면 밴드 홈 피드부터
   const web = await ctx.newPage();
   await web.goto("http://localhost:5179/");
@@ -337,20 +350,28 @@ test("검색 결과(D): 밴드에서 연 검색 결과 '이 검색 결과 저장
   await band.close();
 });
 
-test("검색 결과 주소 여러 개: 넣으면 검색어를 읽어 아래 칸에 채우고, 두 검색 결과의 글을 모은다", async () => {
+test("검색 결과 주소 여러 개: 주소마다 검색어를 읽어 채우고(행별로 고침), 두 검색 결과의 글을 합쳐 모은다", async () => {
   const mgr = await manager();
   await mgr.getByRole("radio", { name: "인물·검색 선택" }).click();
   await mgr.getByPlaceholder("밴드 검색 결과 화면의 주소").fill(`${BAND}/search?keyword=${encodeURIComponent("7번")}\n${BAND}/search?keyword=${encodeURIComponent("3번")}`);
   await expect(mgr.locator(".search-detected li")).toHaveCount(2);
-  await expect(mgr.locator(".search-detected")).toContainText("검색어 '7번' 인식");
-  await expect(mgr.locator(".search-detected")).toContainText("검색어 '3번' 인식");
-  await expect(mgr.getByPlaceholder("검색 주소를 넣으면 자동으로 채워집니다")).toHaveValue("7번, 3번");
+  await expect(mgr.getByLabel("주소 1의 검색어")).toHaveValue("7번");
+  await expect(mgr.getByLabel("주소 2의 검색어")).toHaveValue("3번");
+  // 주소 2의 검색어만 고친다: 주소 1은 그대로, 주소를 다시 넣어도 고친 행은 덮지 않는다
+  await mgr.getByLabel("주소 2의 검색어").fill("13번");
+  await mgr.getByPlaceholder("밴드 검색 결과 화면의 주소").fill(`${BAND}/search?keyword=${encodeURIComponent("7번")}\n${BAND}/search?keyword=${encodeURIComponent("3번")}\n`);
+  await expect(mgr.getByLabel("주소 1의 검색어")).toHaveValue("7번");
+  await expect(mgr.getByLabel("주소 2의 검색어")).toHaveValue("13번");
+  await expect(mgr.locator(".search-detected li").nth(1)).toContainText("직접 고침");
   await mgr.screenshot({ path: `${OUT}/09-multi-search-form.png`, fullPage: true });
   await mgr.getByRole("button", { name: "수집 시작" }).click();
   await waitStatus(mgr, /끝남/, 120_000);
   await expect(mgr.locator(".job-head h2")).toContainText("검색 결과 2곳");
-  // '7번': 17·7, '3번': 13·3
+  // 주소 1('7번'): 17·7 · 주소 2(검색 '3번', 다시 확인 '13번'): 13은 맞고 3은 빠짐. '7번'과 '13번'을 둘 다 포함하라고 묶지 않는다
   await expect(mgr.locator("tbody tr")).toHaveCount(4);
+  await expect(mgr.locator("tr", { hasText: "· 3번 글의" })).toContainText("검색어가 본문");
+  await expect(mgr.locator("tr", { hasText: "· 7번 글의" })).not.toContainText("검색어가 본문");
+  await expect(mgr.locator("tr", { hasText: "13번 글의" })).not.toContainText("검색어가 본문");
   await expect(mgr.locator(".stat.wide", { hasText: "검색 결과에서 찾은 글" })).toHaveCount(2);
   // HTML로 저장: 목차와 글 HTML
   const dl = mgr.waitForEvent("download");
@@ -361,7 +382,7 @@ test("검색 결과 주소 여러 개: 넣으면 검색어를 읽어 아래 칸�
   const { unzipSync, strFromU8 } = await import("fflate");
   const files = unzipSync(new Uint8Array(readFileSync(zipPath)));
   expect(Object.keys(files)).toContain("index.html");
-  expect(Object.keys(files)).toHaveLength(5);
+  expect(Object.keys(files)).toHaveLength(4);
   expect(strFromU8(files["index.html"])).toContain("17번 글의 첫 줄 대사.");
   await mgr.close();
 });

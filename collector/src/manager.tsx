@@ -9,8 +9,10 @@ import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnost
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
 import { parseBandUrl, parseMemberUrl, parsePostUrlList, parseSearchUrl, postKey } from "./urls";
 import { describeSelection } from "./selection";
+import { readArchive, type ArchiveReadResult } from "../../src/archive/reader";
+import { summarizeArchive, type ArchiveSummary } from "./archiveImport";
 import { computeOutcome, computeTotals, followUpText } from "./totals";
-import { profileImages } from "../../src/importers/band/profile";
+import { profileImages, profileSummary, type BandProfileRecord } from "../../src/importers/band/profile";
 import { renderProfileHtml } from "../../src/exporters/profileHtml";
 import { blobToDataUrl } from "../../src/exporters/html";
 import { blocksToPlainText, parseBandHtml } from "../../src/importers/band/html";
@@ -132,6 +134,7 @@ function Manager() {
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const job = jobs.find((j) => j.id === sel) ?? null;
+  const [archive, setArchive] = useState<{ r: ArchiveReadResult; summary: ArchiveSummary } | null>(null);
 
   return (
     <div className="mgr">
@@ -146,9 +149,31 @@ function Manager() {
       </header>
       <div className="mgr-body">
         <aside className="mgr-jobs">
-          <button type="button" className="ui-btn ui-btn-primary" onClick={() => setCreating(true)}>
+          <button type="button" className="ui-btn ui-btn-primary" onClick={() => (setCreating(true), setArchive(null))}>
             새 수집
           </button>
+          <label className="ui-btn archive-pick" title="사이트·로컬 실행판·확장이 만든 .afterlog를 열어 내용을 보고, 모자란 자료만 이어 수집합니다">
+            보관 파일 가져오기
+            <input
+              type="file"
+              accept=".afterlog,.zip"
+              multiple
+              hidden
+              aria-label="보관 파일 가져오기"
+              onChange={async (e) => {
+                const fs = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (!fs.length) return;
+                try {
+                  const r = await readArchive(fs);
+                  setArchive({ r, summary: summarizeArchive(r) });
+                  setMessage(null);
+                } catch (err) {
+                  setMessage({ kind: "error", text: `보관 파일을 열지 못했습니다: ${(err as Error).message}` });
+                }
+              }}
+            />
+          </label>
           <ul>
             {jobs.map((j) => (
               <li key={j.id}>
@@ -158,6 +183,7 @@ function Manager() {
                   onClick={() => {
                     setSel(j.id);
                     setCreating(false);
+                    setArchive(null);
                   }}
                 >
                   <span className="ellipsis">{jobTitle(j)}</span>
@@ -172,7 +198,29 @@ function Manager() {
         </aside>
         <main className="mgr-main">
           {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
-          {creating || !job ? (
+          {archive ? (
+            <ArchiveView
+              archive={archive}
+              onClose={() => setArchive(null)}
+              onResume={async () => {
+                const sm = archive.summary;
+                const bands = new Set(sm.resume.posts.map((x) => x.key.split(":")[1]));
+                const job = await createJob({
+                  scope: "post-urls",
+                  label: `이어 수집 · ${sm.title}`,
+                  options: { ...DEFAULT_OPTIONS, skipCaptured: false },
+                  bandNo: bands.size === 1 ? [...bands][0] : null,
+                  posts: sm.resume.posts,
+                  profiles: sm.resume.profiles.map((url) => ({ url })),
+                });
+                setArchive(null);
+                await reload();
+                setSel(job.id);
+                setCreating(false);
+                void start(job.id);
+              }}
+            />
+          ) : creating || !job ? (
             <NewJob
               initialListUrl={formUrl}
               onCreated={async (id) => {
@@ -220,7 +268,7 @@ export async function jobFromPage(kind: "post" | "list" | "sel" | "search" | "po
       commentedPosts: false,
       periodFrom: null,
       periodTo: null,
-      search: { url: q.url, keywords: q.keywords, match: "any", exclude: [], fields: "body" },
+      search: { url: q.url, rows: [{ url: q.url, keywords: q.keywords }], keywords: [], match: "any", exclude: [], fields: "body" },
     };
     const same = await findSameJob((j) => j.scope === "selection" && JSON.stringify(j.options.selection) === JSON.stringify(selection));
     if (same) return { id: same.id };
@@ -284,9 +332,10 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
   const initialSearch = initialListUrl && !initialMember && /\/search|[?&](keyword|query|q|searchKeyword)=/.test(initialListUrl) ? parseSearchUrl(initialListUrl) : null;
   const [mode, setMode] = useState<NewMode>(initialMember || initialSearch ? "person" : initialListUrl ? "list" : "urls");
   const [searchUrl, setSearchUrl] = useState(initialSearch?.url ?? "");
-  const [keywords, setKeywords] = useState(initialSearch?.keywords.join(", ") ?? "");
-  // 검색어 칸을 직접 고치기 전까지는 검색 주소에서 읽은 검색어로 자동으로 채운다
-  const [keywordsTouched, setKeywordsTouched] = useState(false);
+  // 모든 검색 결과에 더 거는 공통 필터(선택). 주소마다의 검색어는 rowEdits
+  const [keywords, setKeywords] = useState("");
+  // 주소별 검색어를 직접 고친 행(주소 → 입력값). 고친 행은 주소를 다시 읽어도 덮어쓰지 않는다(행별 잠금)
+  const [rowEdits, setRowEdits] = useState<Record<string, string>>({});
   const [exclude, setExclude] = useState("");
   const [matchAll, setMatchAll] = useState(false);
   const [withComments, setWithComments] = useState(false);
@@ -318,22 +367,32 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
   const parsedSearch = searchLines.map((line) => ({ line, q: parseSearchUrl(line) }));
   const goodSearch = parsedSearch.filter((x): x is { line: string; q: NonNullable<ReturnType<typeof parseSearchUrl>> } => !!x.q);
   const badSearch = parsedSearch.filter((x) => !x.q).length;
-  const detectedKeywords = [...new Set(goodSearch.flatMap((x) => x.q.keywords))];
-  const sq = goodSearch.length ? { url: goodSearch[0].q.url, urls: [...new Set(goodSearch.map((x) => x.q.url))], bandNo: goodSearch[0].q.bandNo } : null;
-  const onSearchUrls = (v: string) => {
-    setSearchUrl(v);
-    if (!keywordsTouched) {
-      const found = [...new Set(v.split(/\s+/).filter(Boolean).flatMap((l) => parseSearchUrl(l)?.keywords ?? []))];
-      setKeywords(found.join(", "));
-    }
-  };
+  // 주소마다: 주소에서 읽은 검색어(자동) 또는 사용자가 고친 값(잠금). 같은 주소는 한 번만
+  const searchRows = goodSearch
+    .filter((x, i) => goodSearch.findIndex((y) => y.q.url === x.q.url) === i)
+    .map((x) => {
+      const edited = rowEdits[x.q.url];
+      return { url: x.q.url, detected: x.q.keywords, keywords: edited !== undefined ? terms(edited) : x.q.keywords, locked: edited !== undefined };
+    });
+  const sq = goodSearch.length ? { url: goodSearch[0].q.url, urls: searchRows.map((r) => r.url), bandNo: goodSearch[0].q.bandNo } : null;
+  const onSearchUrls = (v: string) => setSearchUrl(v);
   const postConds = (members.length ? [modes.authored, modes.commentedPosts].filter(Boolean).length : 0) + (sq ? 1 : 0);
   const selection: Selection = {
     members: members.length && (modes.authored || modes.commentsOnly || modes.commentedPosts || modes.profile) ? members : [],
     ...(members.length ? modes : { authored: false, commentsOnly: false, commentedPosts: false, profile: false }),
     periodFrom: opts.periodFrom,
     periodTo: opts.periodTo,
-    search: sq ? { url: sq.url, urls: sq.urls, keywords: terms(keywords), match: matchAll ? "all" : "any", exclude: terms(exclude), fields: withComments ? "bodyAndComments" : "body" } : null,
+    search: sq
+      ? {
+          url: sq.url,
+          urls: sq.urls,
+          rows: searchRows.map((r) => ({ url: r.url, keywords: r.keywords, ...(r.locked ? { locked: true } : {}) })),
+          keywords: terms(keywords),
+          match: matchAll ? "all" : "any",
+          exclude: terms(exclude),
+          fields: withComments ? "bodyAndComments" : "body",
+        }
+      : null,
     combine: combineAnd && postConds >= 2 ? "and" : "or",
   };
 
@@ -442,40 +501,53 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
               <textarea rows={3} value={searchUrl} onChange={(e) => onSearchUrls(e.target.value)} placeholder="밴드 검색 결과 화면의 주소" />
             </label>
             {parsedSearch.length ? (
-              <ul className="small plain-list search-detected">
-                {parsedSearch.map((x, i) => (
-                  <li key={i} className={x.q ? undefined : "is-bad"}>
-                    주소 {i + 1}: {!x.q ? "밴드 안의 주소가 아님" : x.q.keywords.length ? `검색어 ${x.q.keywords.map((k) => `'${k}'`).join(", ")} 인식` : "검색어를 주소에서 읽지 못함(아래 칸에 직접 넣으세요)"}
-                  </li>
-                ))}
+              <ul className="plain-list search-detected">
+                {parsedSearch.map((x, i) => {
+                  const row = x.q ? searchRows.find((r) => r.url === x.q!.url) : null;
+                  return (
+                    <li key={i} className={x.q ? "search-row" : "search-row is-bad"}>
+                      <span className="small">주소 {i + 1}</span>
+                      {!x.q || !row ? (
+                        <span className="small">밴드 안의 주소가 아님</span>
+                      ) : (
+                        <>
+                          <input
+                            aria-label={`주소 ${i + 1}의 검색어`}
+                            value={rowEdits[row.url] ?? row.detected.join(", ")}
+                            onChange={(e) => setRowEdits((m) => ({ ...m, [row.url]: e.target.value }))}
+                            placeholder="검색어를 주소에서 읽지 못함(직접 넣거나 비워 두면 검색 결과 그대로)"
+                          />
+                          <small className="muted">
+                            {row.locked ? "직접 고침" : row.detected.length ? "주소에서 읽음" : "읽지 못함"}
+                            {row.locked ? (
+                              <button
+                                type="button"
+                                className="ui-link small"
+                                onClick={() =>
+                                  setRowEdits((m) => {
+                                    const n = { ...m };
+                                    delete n[row.url];
+                                    return n;
+                                  })
+                                }
+                              >
+                                {" "}
+                                되돌리기
+                              </button>
+                            ) : null}
+                          </small>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : null}
+            {searchRows.length > 1 ? <p className="small muted">주소가 여럿이면 각 주소에서 찾은 글을 그 주소의 검색어로 다시 확인하고 결과를 합칩니다(서로 다른 주소의 검색어를 '모두 포함'으로 묶지 않음). 같은 글은 한 번만 엽니다.</p> : null}
             <div className="row">
               <label className="field">
-                <span>
-                  다시 확인할 검색어 (쉼표로 여러 개, 비우면 밴드 검색 결과를 그대로)
-                  {detectedKeywords.length && keywordsTouched ? (
-                    <button
-                      type="button"
-                      className="ui-link small"
-                      onClick={() => {
-                        setKeywordsTouched(false);
-                        setKeywords(detectedKeywords.join(", "));
-                      }}
-                    >
-                      {" "}
-                      주소에서 읽은 검색어로 되돌리기
-                    </button>
-                  ) : null}
-                </span>
-                <input
-                  value={keywords}
-                  onChange={(e) => {
-                    setKeywordsTouched(true);
-                    setKeywords(e.target.value);
-                  }}
-                  placeholder="검색 주소를 넣으면 자동으로 채워집니다"
-                />
+                <span>공통 필터 (선택 · 모든 검색 결과에 더 거는 검색어, 쉼표로 여러 개)</span>
+                <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="비워 두면 주소별 검색어만" />
               </label>
               <label className="field">
                 <span>제외어 (선택)</span>
@@ -1083,3 +1155,107 @@ createRoot(document.getElementById("root")!).render(
     <Manager />
   </StrictMode>,
 );
+
+/** 보관 파일 내용 보기 + 모자란 자료 이어 수집(가져오자마자 수집하지 않음) */
+function ArchiveView({ archive, onClose, onResume }: { archive: { r: ArchiveReadResult; summary: ArchiveSummary }; onClose(): void; onResume(): void }) {
+  const { r, summary: sm } = archive;
+  const assetBySha = useMemo(() => new Map(r.manifest.assets.map((a) => [a.sha256, a])), [r]);
+  const dataUrlOf = async (path: string, mime: string) => {
+    const bytes = r.files[path];
+    return bytes ? blobToDataUrl(new Blob([bytes as BlobPart], { type: mime })) : null;
+  };
+  const openHtml = (html: string) => {
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+  const openDoc = async (id: string) => {
+    const doc = r.data.documents.find((d) => d.id === id);
+    if (!doc) return;
+    const { renderDocumentHtml, usedAssetIds } = await import("../../src/exporters/html");
+    const urls = new Map<string, string>();
+    for (const aid of usedAssetIds(doc)) {
+      const m = r.manifest.assets.find((a) => a.id === aid);
+      const u = m ? await dataUrlOf(m.path, m.mime) : null;
+      if (u) urls.set(aid, u);
+    }
+    openHtml(renderDocumentHtml(doc, urls, "light"));
+  };
+  const openProfile = async (rec: BandProfileRecord) => {
+    const urls = new Map<string, string>();
+    for (const ref of profileImages(rec)) {
+      const m = ref.sha256 ? assetBySha.get(ref.sha256) : undefined;
+      const u = m ? await dataUrlOf(m.path, m.mime) : null;
+      if (u) urls.set(ref.src, u);
+    }
+    openHtml(renderProfileHtml(rec, (i) => urls.get(i.src) ?? null, { generator: `AFTERLOG Collector ${COLLECTOR_VERSION}` }));
+  };
+  const nResume = sm.resume.posts.length + sm.resume.profiles.length;
+  return (
+    <section className="card archive-view">
+      <div className="job-head">
+        <h2>보관 파일: {sm.title}</h2>
+        <button type="button" className="ui-link" onClick={onClose}>
+          닫기
+        </button>
+      </div>
+      <p className="small muted">
+        {sm.producer === "afterlog-collector" ? "수집 확장" : sm.producer === "afterlog-web" ? "AFTERLOG 사이트·로컬 실행판" : sm.producer || "만든 곳 모름"} v{sm.appVersion} · {new Date(sm.exportedAt).toLocaleString()} 저장
+        {sm.missingParts.length ? ` · 빠진 파트 ${sm.missingParts.join(", ")}번(그 파트의 이미지 없음)` : ""}
+      </p>
+      <p>
+        글 {sm.docs.filter((d) => d.format === "band-post").length}개 · 댓글 모음 {sm.docs.filter((d) => d.format === "band-member-comments").length}개 · 프로필 {sm.profiles.length}명
+      </p>
+      <div className="row">
+        <button type="button" className="ui-btn ui-btn-primary" disabled={!nResume} onClick={onResume} title="댓글이 모자란 글·실패한 글·스토리를 다 못 모은 프로필만 다시 엽니다">
+          부족한 자료 이어 수집 ({sm.resume.posts.length ? `글 ${sm.resume.posts.length}` : ""}
+          {sm.resume.posts.length && sm.resume.profiles.length ? " · " : ""}
+          {sm.resume.profiles.length ? `프로필 ${sm.resume.profiles.length}` : ""}
+          {!nResume ? "없음" : ""})
+        </button>
+      </div>
+      {sm.notResumable ? <p className="small muted">모자란 자료 {sm.notResumable}개는 원래 주소가 파일에 없어 이어 수집할 수 없습니다(열람은 됩니다).</p> : null}
+      <p className="small muted">이어 수집으로 새로 받은 자료는 새 작업으로 저장됩니다. AFTERLOG에서 기존 프로젝트에 '지금 프로젝트에 합치기'로 넣으면 같은 글에는 새 댓글만 보태집니다.</p>
+      {sm.profiles.length ? (
+        <>
+          <h3>프로필</h3>
+          <ul className="plain-list">
+            {sm.profiles.map((p, i) => (
+              <li key={i}>
+                <button type="button" className="ui-link" onClick={() => void openProfile(p.record)}>
+                  {profileSummary(p.record)}
+                </button>
+                {p.needsMore ? <small className="muted"> · 보완 필요</small> : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {sm.docs.length ? (
+        <>
+          <h3>글·댓글 모음</h3>
+          <ul className="plain-list archive-docs">
+            {sm.docs.map((d) => (
+              <li key={d.id}>
+                <button type="button" className="ui-link" onClick={() => void openDoc(d.id)}>
+                  {d.title}
+                </button>
+                <small className="muted">
+                  {" "}
+                  · 댓글 {d.comments}
+                  {d.short ? " · 댓글 모자람" : ""}
+                </small>
+                {d.url ? (
+                  <a className="ui-link small" href={d.url} target="_blank" rel="noreferrer">
+                    {" "}
+                    밴드에서 열기 ↗
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </section>
+  );
+}

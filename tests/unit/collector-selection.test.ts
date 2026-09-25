@@ -398,4 +398,42 @@ describe("검색 결과 주소 여러 개", () => {
     expect(posts.map((p) => p.key.split(":").pop()).sort()).toEqual(["41", "42", "43"]);
     expect(b.opened.filter((n) => n === 42)).toHaveLength(1);
   });
+
+  it("S01 주소마다 다른 검색어: 그 주소에서 찾은 글만 그 검색어로 확인하고 결과는 합친다(둘 다 포함으로 묶지 않음)", async () => {
+    const urls = [`https://band.us/band/${BAND}/search?keyword=A`, `https://band.us/band/${BAND}/search?keyword=B`];
+    const b = new FakeBand([], []);
+    b.discoverRound = async () => ({
+      links: b.current.endsWith("A") ? [postUrl(41), postUrl(42)] : [postUrl(42), postUrl(43)],
+      scrollHeight: 100,
+      loading: false,
+      atBottom: true,
+      endMarker: false,
+      loginRequired: false,
+    });
+    const rows = [
+      { url: urls[0], keywords: ["41번"] },
+      { url: urls[1], keywords: ["43번"] },
+    ];
+    const { tasks, posts } = await run(sel({ search: { url: urls[0], urls, rows, keywords: [], match: "any", exclude: [], fields: "body" } }), b);
+    const byNo = (n: number) => tasks.find((t) => t.kind === "post" && t.key.endsWith(`:${n}`))!;
+    expect(byNo(42).searchRows?.sort()).toEqual([0, 1]);
+    expect(posts.filter((p) => p.status !== "skipped").map((p) => p.key.split(":").pop()).sort()).toEqual(["41", "43"]);
+    expect(byNo(42).errorCode).toBe("noMatch");
+    expect(b.opened.filter((n) => n === 42)).toHaveLength(1);
+  });
+});
+
+describe("확장에서 보관 파일 가져오기", () => {
+  it("F01 앱·확장 파일을 읽어 내용과 이어 수집 대상을 만든다(수집은 시작하지 않음)", async () => {
+    const { readArchive } = await import("../../src/archive/reader");
+    const { summarizeArchive } = await import("../../collector/src/archiveImport");
+    const r = await readArchive([new Blob([readFileSync("tests/fixtures/afterlog/collector-sample.afterlog")])]);
+    const sm = summarizeArchive(r);
+    expect(sm.docs.length).toBe(r.data.documents.length);
+    expect(sm.producer).toBe("afterlog-collector");
+    // 모자란 글·실패한 글만, 글 주소가 있는 것만
+    for (const p of sm.resume.posts) expect(p.url).toMatch(/\/post\/\d+/);
+    expect(new Set(sm.resume.posts.map((p) => p.key)).size).toBe(sm.resume.posts.length);
+    expect(await cdb().jobs.count()).toBe(0);
+  });
 });

@@ -457,3 +457,13 @@ select {
 .search-detected .is-bad {
   color: #b3261e;
 }
+.search-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px 8px;
+  align-items: center;
+  margin: 4px 0;
+}
+.search-row input {
+  min-width: 0;
+}

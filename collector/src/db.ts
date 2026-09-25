@@ -56,6 +56,11 @@ export interface SearchSelection {
   url: string;
   /** 검색 결과 주소 여러 개(없으면 url 하나). 주소마다 목록 과제를 만든다 */
   urls?: string[];
+  /**
+   * 주소마다 다시 확인할 검색어(0.3.1+, 팝업·병합 명세 8.2). 한 글은 그 글을 찾은 주소의 검색어 중 하나에 맞으면 된다(주소끼리는 합집합).
+   * 주소 A의 이름과 주소 B의 이름을 '둘 다 포함'으로 합치지 않는다. 있으면 keywords는 모든 결과에 더 거는 공통 필터
+   */
+  rows?: { url: string; keywords: string[]; locked?: boolean }[];
   /** 로컬 재검증 검색어. 비우면 밴드 검색 결과를 그대로 믿는다 */
   keywords: string[];
   /** any 하나라도 포함(기본) · all 모두 포함(같은 본문 또는 같은 댓글 안에서) */
@@ -129,6 +134,8 @@ export interface Task {
   url: string;
   /** 대상이 된 이유(post). 같은 글이 여러 조건에 걸리면 모두 쌓는다 */
   reasons?: SelectReason[];
+  /** 검색에서 찾은 글: 찾은 검색 주소(rows 번호) */
+  searchRows?: number[];
   /** 목록 과제가 어떤 조건의 탐색인지(list·comments) */
   listReason?: SelectReason;
   memberKey?: string;

@@ -52,7 +52,13 @@ export function describeSelection(sel: Selection): string {
     const who = sel.members.map((m) => m.name).filter(Boolean).join("·") || (sel.members.length > 1 ? `인물 ${sel.members.length}명` : "선택한 인물");
     parts.push(`${who}의 ${modes.join("·")}`);
   }
-  if (sel.search) {
+  if (sel.search?.rows?.length) {
+    const rows = sel.search.rows;
+    const each = rows.map((r) => (r.keywords.length ? r.keywords.map((x) => `'${x}'`).join(sel.search!.match === "all" ? "+" : "/") : "검색 결과 그대로")).join(" 또는 ");
+    const extra = sel.search.keywords.length ? ` · 공통 ${sel.search.keywords.map((x) => `'${x}'`).join("/")}` : "";
+    const body = rows.length > 1 ? `검색 결과 ${rows.length}곳(${each})` : rows[0].keywords.length ? `검색 결과 중 ${each}` : "검색 결과";
+    parts.push(`${body}${extra}${sel.search.fields === "bodyAndComments" ? "(본문·댓글)" : ""}`);
+  } else if (sel.search) {
     const k = sel.search.keywords;
     const n = sel.search.urls?.length ?? 1;
     const where = n > 1 ? `검색 결과 ${n}곳` : "검색 결과";
@@ -119,7 +125,23 @@ export interface PostVerdict {
  * 검색 = 검색어 일치 + 일치한 단위의 작성일 기간. 합집합은 하나라도 맞으면, 교집합은 켜진 글 조건 모두 맞아야.
  * 판단 불가(null)는 참으로 보지 않는다.
  */
-export function judgePost(doc: ParsedDocument, reasons: SelectReason[], sel: Selection, commentsComplete: boolean): PostVerdict {
+/**
+ * 주소별 검색어로 판단(rows가 있을 때). 글을 찾은 주소들의 검색어 중 하나라도 맞으면 일치(합집합).
+ * 공통 필터(keywords)가 있으면 그것도 맞아야 한다. 주소별 검색어가 비어 있으면 그 검색 결과를 그대로 믿는다.
+ */
+export function searchPostRows(doc: ParsedDocument, s: SearchSelection, commentsComplete: boolean, rows?: number[]): SearchVerdict {
+  const list = s.rows ?? [];
+  const use = rows?.length ? rows.map((i) => list[i]).filter(Boolean) : list;
+  const verdicts = use.map((r) => searchPost(doc, { ...s, keywords: r.keywords }, commentsComplete));
+  const matches = verdicts.flatMap((v) => v.matches);
+  const rowMatch = !verdicts.length ? true : verdicts.some((v) => v.match === true) ? true : verdicts.some((v) => v.match === null) ? null : false;
+  const common = s.keywords.some((k) => k.trim()) ? searchPost(doc, s, commentsComplete) : null;
+  const all = [...matches, ...(common?.matches ?? [])];
+  if (common && common.match !== true) return { match: rowMatch === false ? false : common.match, matches: all };
+  return { match: rowMatch, matches: all };
+}
+
+export function judgePost(doc: ParsedDocument, reasons: SelectReason[], sel: Selection, commentsComplete: boolean, searchRows?: number[]): PostVerdict {
   const post = doc.entries.find((e) => e.kind === "post");
   const inPeriod = (local: string | null) => periodContains(local, sel.periodFrom, sel.periodTo);
   const state = new Map<SelectReason, boolean | null>();
@@ -128,7 +150,7 @@ export function judgePost(doc: ParsedDocument, reasons: SelectReason[], sel: Sel
   if (reasons.includes("authored")) state.set("authored", inPeriod(post?.time?.local ?? null));
   if (reasons.includes("commented")) state.set("commented", true);
   if (reasons.includes("search") && sel.search) {
-    const v = searchPost(doc, sel.search, commentsComplete);
+    const v = sel.search.rows?.length ? searchPostRows(doc, sel.search, commentsComplete, searchRows) : searchPost(doc, sel.search, commentsComplete);
     matches = v.matches;
     if (v.match === null) {
       state.set("search", null);

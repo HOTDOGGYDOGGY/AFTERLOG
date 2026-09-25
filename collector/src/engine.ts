@@ -46,12 +46,12 @@ const INTERRUPTED = { ok: false as const, code: "other", text: "일시정지", r
  * 이전 작업에서 저장한 본문을 이 작업에 다시 쓴다(열지 않음, 7.1-4). 댓글을 다 못 받은(일부) 저장본은 쓰지 않고 다시 연다. 결과에는 '이전 저장본 재사용'으로 남긴다(9절 최신성).
  * 트랜잭션 안에서 부른다. 과제에 넣을 상태 필드를 돌려준다
  */
-async function reuseCapture(before: Capture, jobId: string, taskId: string, key: string, reasons: SelectReason[], sel?: Selection | null): Promise<Partial<Task>> {
+async function reuseCapture(before: Capture, jobId: string, taskId: string, key: string, reasons: SelectReason[], sel?: Selection | null, searchRows?: number[]): Promise<Partial<Task>> {
   const doc = parseBandHtml(before.html).documents.find((d) => d.format === "band-post");
   const title = doc?.title;
   const reusedNote = `이전 작업에서 저장한 본문을 다시 썼습니다(${before.capturedAt.slice(0, 10)} 저장, 이번에 다시 열지 않음).`;
   // 선택 수집이면 다시 쓴 본문도 같은 조건으로 판정한다(검색어·기간)
-  const v = sel && doc ? judgePost(doc, reasons, sel, before.commentsShown === null || before.commentsShown <= before.commentsFound) : null;
+  const v = sel && doc ? judgePost(doc, reasons, sel, before.commentsShown === null || before.commentsShown <= before.commentsFound, searchRows) : null;
   const judged = v ? { confirmed: v.confirmed, matches: v.matches?.map(({ where, index, terms }) => ({ where, index, terms })) } : {};
   await cdb().captures.add({ ...before, id: crypto.randomUUID(), jobId, taskId, key, reasons, excluded: v && !v.include ? v.excluded : undefined, reusedFrom: before.capturedAt });
   if (v && !v.include)
@@ -94,11 +94,14 @@ export const EXCLUDED_TEXT: Record<NonNullable<Capture["excluded"]>, string> = {
  * 과제에 선정 사유를 더한다(저장본에도). 조건 판정으로 빠졌던 글이 다른 조건으로 대상이 되면
  * 이미 받아 둔 저장본으로 다시 판정한다(다시 열지 않음). 살렸으면 그 저장본을 돌려준다(이미지를 받게)
  */
-async function addReason(task: Task, reason: SelectReason, job: Job): Promise<Capture | null> {
+async function addReason(task: Task, reason: SelectReason, job: Job, searchRow?: number): Promise<Capture | null> {
   const fresh = (await cdb().tasks.get(task.id)) ?? task;
-  if (fresh.reasons?.includes(reason)) return null;
-  const reasons = [...(fresh.reasons ?? []), reason];
-  await cdb().tasks.update(task.id, { reasons });
+  // 같은 사유라도 다른 검색 주소에서 또 찾으면 그 주소의 검색어로도 판단한다(주소끼리 합집합)
+  const newRow = reason === "search" && searchRow !== undefined && searchRow >= 0 && !(fresh.searchRows ?? []).includes(searchRow);
+  if (fresh.reasons?.includes(reason) && !newRow) return null;
+  const reasons = fresh.reasons?.includes(reason) ? fresh.reasons : [...(fresh.reasons ?? []), reason];
+  const searchRows = newRow ? [...(fresh.searchRows ?? []), searchRow!] : fresh.searchRows;
+  await cdb().tasks.update(task.id, { reasons, searchRows });
   await cdb().captures.where("[jobId+key]").equals([task.jobId, task.key]).modify({ reasons });
   const sel = job.options.selection;
   if (!sel || fresh.status !== "skipped" || !fresh.errorCode || !(fresh.errorCode in EXCLUDED_TEXT)) return null;
@@ -110,7 +113,7 @@ async function addReason(task: Task, reason: SelectReason, job: Job): Promise<Ca
   }
   const doc = parseBandHtml(cap.html).documents.find((d) => d.format === "band-post");
   if (!doc) return null;
-  const v = judgePost(doc, reasons, sel, cap.commentsShown === null || cap.commentsShown <= cap.commentsFound);
+  const v = judgePost(doc, reasons, sel, cap.commentsShown === null || cap.commentsShown <= cap.commentsFound, searchRows);
   const judged = { confirmed: v.confirmed, matches: v.matches?.map(({ where, index, terms }) => ({ where, index, terms })) };
   if (!v.include) {
     await cdb().captures.update(cap.id, { excluded: v.excluded });
@@ -422,6 +425,8 @@ export class Engine {
     await this.gate();
     await this.deps.browser.openList(task.url);
     const reason: SelectReason = task.listReason ?? "list";
+    // 검색 주소별 검색어: 이 목록이 몇 번째 검색 주소인지
+    const searchRow = reason === "search" ? job.options.selection?.search?.rows?.findIndex((r) => r.url === task.url) ?? -1 : -1;
     let emptyRounds = 0;
     let rounds = 0;
     let total = 0;
@@ -456,7 +461,7 @@ export class Engine {
           const exists = await cdb().tasks.where("[jobId+key]").equals([job.id, key]).first();
           if (exists) {
             // 같은 글이 다른 조건으로도 찾아지면 사유만 더한다(원글은 한 번만 연다, 8절)
-            await addReason(exists, reason, job);
+            await addReason(exists, reason, job, searchRow);
             continue;
           }
           const before = job.options.skipCaptured ? await findCapture(key, job.id, true) : undefined;
@@ -468,6 +473,7 @@ export class Engine {
             kind: "post",
             url: p.canonical,
             reasons: [reason],
+            ...(searchRow >= 0 ? { searchRows: [searchRow] } : {}),
             order: order++,
             status: "pending",
             attempts: 0,
@@ -475,7 +481,7 @@ export class Engine {
             errorText: null,
             leaseUntil: 0,
             notBefore: 0,
-            ...(before ? await reuseCapture(before, job.id, id, key, [reason], job.options.selection) : {}),
+            ...(before ? await reuseCapture(before, job.id, id, key, [reason], job.options.selection, searchRow >= 0 ? [searchRow] : undefined) : {}),
           });
           added++;
         }
@@ -1012,7 +1018,7 @@ export class Engine {
         const nowTask = await cdb().tasks.get(task.id);
         capture.reasons = nowTask?.reasons ?? task.reasons;
         if (sel) {
-          verdict = judgePost(doc, capture.reasons ?? [], sel, commentsComplete);
+          verdict = judgePost(doc, capture.reasons ?? [], sel, commentsComplete, nowTask?.searchRows);
           if (!verdict.include) capture.excluded = verdict.excluded;
         }
         await cdb().captures.add(capture);
@@ -1164,7 +1170,7 @@ export async function createJob(input: {
       if (sel.profile) selLists.push({ url: `${base}/profile`, kind: "profile", reason: "list", memberKey: m.memberKey });
     }
     // 검색 결과: 사용자가 연 주소를 그대로(검색어·조건을 일반 주소 정리로 잃지 않게, 4.2)
-    if (sel.search) for (const url of sel.search.urls?.length ? sel.search.urls : [sel.search.url]) selLists.push({ url, kind: "list", reason: "search", memberKey: "" });
+    if (sel.search) for (const url of sel.search.rows?.length ? sel.search.rows.map((r) => r.url) : sel.search.urls?.length ? sel.search.urls : [sel.search.url]) selLists.push({ url, kind: "list", reason: "search", memberKey: "" });
   }
   const now = input.now ?? Date.now();
   const job: Job = {
