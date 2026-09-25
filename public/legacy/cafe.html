@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPBackupAssistant - 네이버카페</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Gothic:wght@400;700&family=Gothic+A1:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./cafe.css">
+</head>
+<body>
+<main class="container" id="mainContainer">
+    <div class="left-panel" id="leftPanel">
+        <div class="panel-section input-section" id="inputSection">
+            <div class="panel-header">📋 댓글 붙여넣기</div>
+            <div class="input-wrapper">
+                <textarea id="inputArea" placeholder="네이버 카페 글/댓글을 여기에 붙여넣으세요...">작성자 정보
+	예시 A
+작성일시2026.01.18. 12:35
+안녕하세요.
+댓글 정보
+^댓글 2	
+등록순
+프로필
+예시 B
+2026.01.18. 12:44답글
+반갑습니다~ (인사한다)
+프로필
+예시 A작성자
+2026.01.18. 12:59답글
+(사망한다)
+프로필
+예시 B
+2026.01.18. 12:57답글
+어째서?! (놀란다)</textarea>
+            </div>
+        </div>
+
+        <div class="panel-section settings-section" id="settingsSection">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="characters">인물 설정</button>
+                <button class="tab-btn" data-tab="display">표시 설정</button>
+                <button class="tab-btn" data-tab="images" id="tabImages" style="display:none;">이미지</button>
+            </div>
+            
+            <div class="panel-content">
+                <div class="tab-content active" id="tab-characters">
+                    <div class="character-list" id="characterList">
+                        <div class="empty-state">
+                            <div class="empty-state-text">댓글을 붙여넣으면<br>인물 목록이 여기에 표시됩니다</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-display">
+                    <div class="settings-group">
+                        <div class="settings-label">스킨</div>
+                        <div class="skin-selector">
+                            <button class="skin-btn active" data-skin="default">기본형</button>
+                            <button class="skin-btn" data-skin="chat">채팅형</button>
+                            <button class="skin-btn" data-skin="navercafe">네이버카페형</button>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">테마</div>
+                        <div class="theme-selector">
+                            <button class="skin-theme-btn active" data-skin-theme="light">라이트</button>
+                            <button class="skin-theme-btn" data-skin-theme="dark">다크</button>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">폰트</div>
+                        <select id="mainFontSelect" class="font-select">
+                            <option value="default">기본 (Noto Sans KR)</option>
+                            <option value="cafe">카페 (돋움)</option>
+                            <option value="myeongjo">나눔명조</option>
+                            <option value="gothic">나눔고딕</option>
+                            <option value="gothica1">Gothic A1</option>
+                            <option value="ibm">IBM Plex Sans KR</option>
+                        </select>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">폰트 크기</div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">전체</span>
+                            <input type="range" id="fontSizeAll" min="10" max="24" value="13" class="font-size-slider">
+                            <input type="number" id="fontSizeAllInput" min="10" max="24" value="13" class="font-size-input">
+                        </div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">닉네임</span>
+                            <input type="range" id="fontSizeNick" min="10" max="24" value="13" class="font-size-slider">
+                            <input type="number" id="fontSizeNickInput" min="10" max="24" value="13" class="font-size-input">
+                        </div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">댓글</span>
+                            <input type="range" id="fontSizeContent" min="10" max="24" value="13" class="font-size-slider">
+                            <input type="number" id="fontSizeContentInput" min="10" max="24" value="13" class="font-size-input">
+                        </div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">본문</span>
+                            <input type="range" id="fontSizePost" min="10" max="24" value="14" class="font-size-slider">
+                            <input type="number" id="fontSizePostInput" min="10" max="24" value="14" class="font-size-input">
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">줄간격</div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">댓글</span>
+                            <input type="range" id="lineHeightContent" min="1.2" max="2.5" value="1.6" step="0.1" class="font-size-slider">
+                            <input type="number" id="lineHeightContentInput" min="1.2" max="2.5" value="1.6" step="0.1" class="font-size-input">
+                        </div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">본문</span>
+                            <input type="range" id="lineHeightPost" min="1.2" max="2.5" value="1.8" step="0.1" class="font-size-slider">
+                            <input type="number" id="lineHeightPostInput" min="1.2" max="2.5" value="1.8" step="0.1" class="font-size-input">
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">시간 표시</div>
+                        <select id="timestampSelect" class="font-select">
+                            <option value="always" selected>항상 표시</option>
+                            <option value="hide">전부 숨기기</option>
+                        </select>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">표시 옵션</div>
+                        <div class="settings-row">
+                            <div class="toggle-switch" data-setting="showDateDivider"></div>
+                            <span class="toggle-label">날짜 구분선</span>
+                        </div>
+                        <div class="settings-row">
+                            <div class="toggle-switch active" data-setting="showReplyIndent"></div>
+                            <span class="toggle-label">대댓글 들여쓰기</span>
+                        </div>
+                        <div class="settings-row">
+                            <div class="toggle-switch" data-setting="showActions" id="showActionsToggle"></div>
+                            <span class="toggle-label">행동 묘사 강조 (괄호)</span>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group" id="actionSettingsGroup" style="display:none;">
+                        <div class="settings-label">행동 묘사 설정</div>
+                        <div class="settings-row" style="margin-bottom:8px;">
+                            <input type="color" id="actionColorPicker" value="#ACACAC" class="color-picker">
+                            <span class="toggle-label">색상</span>
+                            <button class="reset-color-btn" id="resetActionColor">기본값</button>
+                        </div>
+                        <div class="settings-label" style="font-size:11px; margin-top:8px;">스타일</div>
+                        <div class="settings-row" style="margin-bottom:8px;">
+                            <select id="actionStyleSelect" class="font-select" style="width:auto;">
+                                <option value="normal" selected>기본</option>
+                                <option value="italic">이탤릭</option>
+                                <option value="bold">볼드</option>
+                            </select>
+                        </div>
+                        <div class="settings-label" style="font-size:11px; margin-top:8px;">폰트</div>
+                        <select id="actionFontSelect" class="font-select">
+                            <option value="default" selected>기본 (Noto Sans KR)</option>
+                            <option value="cafe">카페 (돋움)</option>
+                            <option value="myeongjo">나눔명조</option>
+                            <option value="gothic">나눔고딕</option>
+                            <option value="gothica1">Gothic A1</option>
+                            <option value="ibm">IBM Plex Sans KR</option>
+                        </select>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <button class="reset-all-btn" id="resetAllSettings">전체 초기화</button>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-images">
+                    <div class="settings-group">
+                        <div class="settings-label">이미지/썸네일 목록</div>
+                        <div id="imageList" class="image-list">
+                            <div class="empty-state">이미지가 없습니다</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="resizer" id="resizer"></div>
+
+    <div class="right-panel">
+        <div class="preview-header">
+            <span class="preview-title">미리보기</span>
+        </div>
+        <div class="preview-area" id="previewArea">
+            <div class="preview-content" id="previewContent">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📝</div>
+                    <div class="empty-state-text">
+                        왼쪽에 네이버 카페 글/댓글을 붙여넣으면<br>
+                        여기에 미리보기가 표시됩니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<input type="file" id="avatarInput" class="hidden-input" accept="image/*">
+<div class="toast" id="toast"></div>
+<script src="./cafe.js"></script>
+</body>
+</html>

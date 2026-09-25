@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>😇 RPBackupAssistant - 트위터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./twitter.css">
+</head>
+<body>
+
+<main class="container" id="mainContainer">
+    <div class="left-panel" id="leftPanel">
+        <div class="panel-section input-section" id="inputSection">
+            <div class="panel-header">📋 트윗/DM 붙여넣기</div>
+            <div class="input-wrapper">
+                <textarea id="inputArea" placeholder="트위터 DM, 타임라인, 또는 멘션 타래를 여기에 붙여넣으세요..."></textarea>
+            </div>
+            <div class="detected-type" id="detectedType">
+                <span class="type-label">감지된 형식:</span>
+                <span class="type-value" id="typeValue">-</span>
+            </div>
+        </div>
+
+        <div class="panel-section settings-section" id="settingsSection">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="characters">인물 설정</button>
+                <button class="tab-btn" data-tab="display">표시 설정</button>
+            </div>
+            
+            <div class="panel-content">
+                <div class="tab-content active" id="tab-characters">
+                    <div class="character-list" id="characterList">
+                        <div class="empty-state">
+                            <div class="empty-state-text">트윗/DM을 붙여넣으면<br>인물 목록이 여기에 표시됩니다</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-display">
+                    <div class="settings-group">
+                        <div class="settings-label">형식</div>
+                        <div class="type-selector">
+                            <button class="type-btn" data-type="dm">DM</button>
+                            <button class="type-btn" data-type="timeline">타임라인</button>
+                            <button class="type-btn" data-type="thread">멘션 타래</button>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">테마</div>
+                        <div class="theme-selector">
+                            <button class="theme-btn active" data-theme="light">라이트</button>
+                            <button class="theme-btn" data-theme="dim">딤</button>
+                            <button class="theme-btn" data-theme="dark">다크</button>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">폰트 크기</div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">전체</span>
+                            <input type="range" id="fontSizeAll" min="10" max="24" value="15" class="font-size-slider">
+                            <input type="number" id="fontSizeAllInput" min="10" max="24" value="15" class="font-size-input">
+                        </div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">닉네임</span>
+                            <input type="range" id="fontSizeName" min="12" max="20" value="15" class="font-size-slider">
+                            <input type="number" id="fontSizeNameInput" min="12" max="20" value="15" class="font-size-input">
+                        </div>
+                        <div class="font-size-row">
+                            <span class="font-size-label">내용</span>
+                            <input type="range" id="fontSizeContent" min="12" max="20" value="15" class="font-size-slider">
+                            <input type="number" id="fontSizeContentInput" min="12" max="20" value="15" class="font-size-input">
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <div class="settings-label">표시 옵션</div>
+                        <div class="settings-row">
+                            <div class="toggle-switch active" data-setting="showTime"></div>
+                            <span class="toggle-label">시간 표시</span>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <button class="reset-all-btn" id="resetAllSettings">전체 초기화</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="resizer" id="resizer"></div>
+
+    <div class="right-panel">
+        <div class="preview-header">
+            <span class="preview-title">미리보기</span>
+        </div>
+        <div class="preview-area" id="previewArea">
+            <div class="preview-content twitter-preview theme-light" id="previewContent">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📝</div>
+                    <div class="empty-state-text">왼쪽에 DM, 타임라인 트윗, 멘션 타래를 붙여넣으면<br>여기에 미리보기가 표시됩니다.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- Help Modal -->
+<div class="modal" id="helpModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>단축키 안내</h2>
+            <button class="modal-close" id="closeHelp">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="shortcut-item">
+                <span class="shortcut-key">Ctrl + Z</span>
+                <span class="shortcut-desc">실행취소</span>
+            </div>
+            <div class="shortcut-item">
+                <span class="shortcut-key">Ctrl + Y</span>
+                <span class="shortcut-desc">다시실행</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="./twitter.js"></script>
+</body>
+</html>

@@ -1,0 +1,2014 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-dark: #f5f5f5;
+    --bg-card: #ffffff;
+    --bg-input: #e8e8e8;
+    --text-primary: #1a1a1f;
+    --text-secondary: #555555;
+    --text-muted: #888888;
+    --accent: #7c6f9f;
+    --accent-light: #a599c9;
+    --border: #d0d0d0;
+    --action-color: #ACACAC;
+    --dialogue-color: #1a1a1f;
+    --danger: #c94a4a;
+}
+
+/* 색상 피커 */
+.color-picker {
+    width: 40px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.reset-color-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: auto;
+}
+
+.reset-color-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+/* Light mode for APP */
+body.light-mode {
+    --bg-dark: #f5f5f5;
+    --bg-card: #ffffff;
+    --bg-input: #e8e8e8;
+    --text-primary: #1a1a1f;
+    --text-secondary: #555555;
+    --text-muted: #888888;
+    --border: #d0d0d0;
+    --dialogue-color: #1a1a1f;
+}
+
+body {
+    font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", system-ui, sans-serif;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    min-height: 100vh;
+    transition: all 0.3s;
+    overflow: hidden;
+}
+
+.header {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-left {
+    display: flex;
+    gap: 8px;
+}
+
+.platform-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.platform-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.platform-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.header-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.logo {
+    font-family: 'Nanum Myeongjo', serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: var(--text-primary);
+}
+
+.header-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.header-btn {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.header-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.header-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.header-btn:disabled:hover {
+    border-color: var(--border);
+    color: var(--text-secondary);
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.left-panel {
+    width: 400px;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--bg-card);
+    overflow: hidden;
+}
+
+.resizer {
+    width: 5px;
+    background: var(--border);
+    cursor: col-resize;
+    transition: background 0.2s;
+}
+
+.resizer:hover {
+    background: var(--accent);
+}
+
+.right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--bg-dark);
+}
+
+.panel-section {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.panel-section.input-section {
+    flex: 0 0 auto;
+    max-height: 45%;
+    min-height: 120px;
+    border-bottom: 1px solid var(--border);
+}
+
+.panel-section.settings-section {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-section + .panel-section {
+    /* border removed - input-section has border-bottom */
+}
+
+.panel-header {
+    padding: 10px 16px;
+    background: var(--bg-input);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.input-wrapper {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#inputArea {
+    width: 100%;
+    flex: 1;
+    min-height: 80px;
+    background: var(--bg-dark);
+    border: none;
+    color: var(--text-primary);
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 12px;
+    resize: vertical;
+    outline: none;
+    overflow-y: auto;
+}
+
+#inputArea::placeholder {
+    color: var(--text-muted);
+}
+
+.character-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.character-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-dark);
+    border-radius: 8px;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.character-item:hover {
+    border-color: var(--border);
+}
+
+.character-item.is-me {
+    border-color: var(--accent);
+    background: rgba(124, 111, 159, 0.1);
+}
+
+.character-item.is-author {
+    border-color: #03c75a;
+    background: rgba(3, 199, 90, 0.1);
+}
+
+.character-item.hidden-char {
+    opacity: 0.5;
+}
+
+.char-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent-light);
+    cursor: pointer;
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 2px solid var(--border);
+    transition: all 0.2s;
+}
+
+.char-avatar:hover {
+    border-color: var(--accent);
+}
+
+.char-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.char-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.char-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.char-name-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+    padding: 2px 0;
+}
+
+.char-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: #03c75a;
+    color: white;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.char-original {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 1px;
+}
+
+.char-controls {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.char-color-picker {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+    background: transparent;
+}
+
+.char-btn {
+    padding: 4px 6px;
+    font-size: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.char-btn:hover {
+    border-color: var(--accent);
+}
+
+.char-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.char-btn.hide-btn.active {
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
+.settings-group {
+    margin-bottom: 14px;
+}
+
+.settings-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    background: var(--bg-dark);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.toggle-switch.active {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    transition: all 0.2s;
+}
+
+.toggle-switch.active::after {
+    left: 20px;
+}
+
+.toggle-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.skin-selector {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.skin-btn {
+    flex: 1;
+    min-width: 70px;
+    padding: 8px 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 10px;
+    transition: all 0.2s;
+}
+
+.skin-btn:hover {
+    border-color: var(--accent);
+}
+
+.skin-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.skin-theme-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.skin-theme-btn {
+    flex: 1;
+    padding: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.2s;
+}
+
+.skin-theme-btn:hover {
+    border-color: var(--accent);
+}
+
+.skin-theme-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.theme-selector {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.font-select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.font-select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.select-wrapper {
+    position: relative;
+}
+
+.select-wrapper select {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+}
+
+.select-wrapper::after {
+    content: '▼';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-dark);
+    overflow: hidden;
+}
+
+.preview-header {
+    padding: 10px 20px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.preview-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.export-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+.export-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.export-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    background: var(--bg-input);
+}
+
+.export-btn.danger {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.export-btn.danger:hover {
+    background: var(--danger);
+    color: white;
+}
+
+.preview-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.preview-content {
+    max-width: 750px;
+    margin: 0 auto;
+}
+
+/* ========== 채팅형 스킨 ========== */
+.skin-chat .rp-main-post {
+    margin-bottom: 24px;
+    padding: 20px;
+    background: var(--skin-bg-card);
+    border-radius: 12px;
+    border-left: 4px solid var(--accent);
+}
+
+.skin-chat .rp-main-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.skin-chat .rp-main-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--skin-bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    overflow: hidden;
+    border: 2px solid var(--accent);
+}
+
+.skin-chat .rp-main-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.skin-chat .rp-main-info {
+    flex: 1;
+}
+
+.skin-chat .rp-main-author {
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--skin-text);
+}
+
+.skin-chat .rp-author-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: var(--accent);
+    color: white;
+    border-radius: 3px;
+}
+
+.skin-chat .rp-main-date {
+    font-size: 12px;
+    color: var(--skin-text-muted);
+    margin-top: 2px;
+}
+
+.skin-chat .rp-main-content {
+    line-height: 1.8;
+    font-size: 14px;
+    color: var(--skin-text);
+}
+
+.skin-chat .rp-post {
+    margin-bottom: 16px;
+}
+
+.skin-chat .rp-post {
+    padding: 10px 16px;
+    position: relative;
+}
+
+.skin-chat .rp-post.rp-reply {
+    margin-left: 48px;
+    padding-left: 24px;
+}
+
+.skin-chat .rp-post.rp-reply::before {
+    content: 'ㄴ';
+    position: absolute;
+    left: 0;
+    top: 22px;
+    font-size: 16px;
+    color: var(--skin-text-muted);
+    font-weight: 700;
+}
+
+.skin-chat .rp-post-main {
+    display: flex;
+    gap: 12px;
+}
+
+.skin-chat .rp-post.is-me .rp-post-main {
+    flex-direction: row-reverse;
+}
+
+.skin-chat .rp-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: var(--skin-bg-card);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 500;
+    flex-shrink: 0;
+    overflow: hidden;
+    border: 2px solid var(--skin-border);
+}
+
+.skin-chat .rp-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.skin-chat .rp-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.skin-chat .rp-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.skin-chat .rp-post.is-me .rp-header {
+    flex-direction: row-reverse;
+}
+
+.skin-chat .rp-author {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--skin-text);
+}
+
+.skin-chat .rp-date {
+    font-size: 11px;
+    color: var(--skin-text-muted);
+}
+
+.skin-chat .rp-content {
+    background: var(--skin-bg-card);
+    padding: 12px 16px;
+    border-radius: 12px;
+    border-top-left-radius: 4px;
+    line-height: 1.7;
+    font-size: 13px;
+    position: relative;
+    color: var(--skin-text);
+}
+
+.skin-chat .rp-post.is-me .rp-content {
+    border-top-left-radius: 12px;
+    border-top-right-radius: 4px;
+    background: rgba(124, 111, 159, 0.15);
+}
+
+.skin-chat .rp-content-text {
+    outline: none;
+}
+
+.skin-chat .rp-content-text:focus {
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+    padding: 4px;
+    margin: -4px;
+}
+
+.skin-chat .rp-controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.skin-chat .rp-post:hover .rp-controls {
+    opacity: 1;
+}
+
+.skin-chat .rp-ctrl-btn {
+    padding: 2px 6px;
+    font-size: 10px;
+    background: var(--skin-bg-input);
+    border: 1px solid var(--skin-border);
+    color: var(--skin-text-muted);
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.skin-chat .rp-ctrl-btn:hover {
+    color: var(--skin-text);
+    border-color: var(--accent);
+}
+
+.skin-chat .rp-ctrl-btn.delete-btn:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+/* ========== 기본형 스킨 (네이버 카페 라이트) ========== */
+.skin-default {
+    background: var(--skin-bg);
+    border-radius: 0;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif;
+}
+
+.skin-default .rp-main-post {
+    padding: 20px;
+    border-bottom: 1px solid var(--skin-border);
+    background: var(--skin-bg);
+}
+
+.skin-default .rp-main-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.skin-default .rp-main-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--skin-bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: var(--skin-text-muted);
+    overflow: hidden;
+}
+
+.skin-default .rp-main-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.skin-default .rp-main-info {
+    flex: 1;
+}
+
+.skin-default .rp-main-author {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--skin-text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.skin-default .rp-author-badge {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: #03c75a;
+    color: white;
+    border-radius: 10px;
+}
+
+.skin-default .rp-main-date {
+    font-size: 12px;
+    color: var(--skin-text-muted);
+    margin-top: 2px;
+}
+
+.skin-default .rp-main-content {
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--skin-text);
+}
+
+.skin-default .rp-comments-header {
+    padding: 12px 20px;
+    background: var(--skin-bg-card);
+    border-bottom: 1px solid var(--skin-border);
+    font-size: 13px;
+    color: var(--skin-text);
+    font-weight: 500;
+}
+
+.skin-default .rp-comments-header span {
+    color: #03c75a;
+    font-weight: 700;
+}
+
+.skin-default .rp-post {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--skin-border-light);
+    background: var(--skin-bg);
+    position: relative;
+}
+
+.skin-default .rp-post:hover {
+    background: var(--skin-bg-hover);
+}
+
+.skin-default .rp-post.is-me {
+    background: var(--skin-bg-me);
+}
+
+.skin-default .rp-post.is-me:hover {
+    background: var(--skin-bg-me-hover);
+}
+
+.skin-default .rp-post-main {
+    display: flex;
+    gap: 12px;
+}
+
+.skin-default .rp-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--skin-bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: var(--skin-text-muted);
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.skin-default .rp-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.skin-default .rp-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.skin-default .rp-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.skin-default .rp-author {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--skin-text);
+}
+
+.skin-default .rp-date {
+    font-size: 12px;
+    color: var(--skin-text-muted);
+}
+
+.skin-default .rp-content {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--skin-text);
+}
+
+.skin-default .rp-content-text {
+    outline: none;
+}
+
+.skin-default .rp-content-text:focus {
+    background: rgba(0,0,0,0.03);
+    border-radius: 4px;
+    padding: 4px;
+    margin: -4px;
+}
+
+.skin-default .rp-mention {
+    color: #03c75a;
+    font-weight: 500;
+}
+
+.skin-default .rp-controls {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.skin-default .rp-post:hover .rp-controls {
+    opacity: 1;
+}
+
+.skin-default .rp-ctrl-btn {
+    font-size: 12px;
+    background: none;
+    border: none;
+    color: var(--skin-text-muted);
+    cursor: pointer;
+    padding: 0;
+}
+
+.skin-default .rp-ctrl-btn:hover {
+    color: var(--skin-text);
+}
+
+.skin-default .rp-ctrl-btn.delete-btn:hover {
+    color: #c94a4a;
+}
+
+/* 대댓글 */
+.skin-default .rp-reply {
+    margin-left: 40px !important;
+    position: relative;
+    background: var(--skin-bg-reply);
+}
+
+.skin-default .rp-reply.is-me {
+    background: var(--skin-bg-me);
+}
+
+.skin-default .rp-reply::before {
+    content: 'ㄴ';
+    position: absolute;
+    left: -24px;
+    top: 18px;
+    color: var(--skin-text-muted);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* ========== 네이버카페형 스킨 (다크) ========== */
+.skin-navercafe {
+    background: #070707;
+    border-radius: 0;
+    overflow: hidden;
+    font-family: 'Apple SD Gothic Neo', '맑은 고딕', 'Malgun Gothic', 돋움, dotum, sans-serif;
+}
+
+.skin-navercafe .rp-main-post {
+    padding: 10px;
+    padding-top: 15px;
+    border-top: none;
+    background: #070707;
+}
+
+.skin-navercafe .rp-main-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 0;
+}
+
+.skin-navercafe .rp-main-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #b1b1b1;
+    overflow: hidden;
+}
+
+.skin-navercafe .rp-main-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.skin-navercafe .rp-main-info {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.skin-navercafe .rp-main-author {
+    font-weight: 400;
+    font-size: 13px;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.skin-navercafe .rp-main-date {
+    font-size: 11px;
+    color: #b1b1b1;
+    opacity: 0.5;
+}
+
+.skin-navercafe .rp-main-content {
+    padding: 10px 0 5px 0;
+    border-top: 1px solid #333333;
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #b1b1b1;
+    word-break: break-all;
+}
+
+.skin-navercafe .rp-comments-section {
+    background: #212121;
+    padding: 11px 26px 16px 24px;
+}
+
+.skin-navercafe .rp-post {
+    padding: 10px 0 7px 0;
+    border-bottom: 1px dotted rgba(193, 192, 193, 0.3);
+    background: transparent;
+    position: relative;
+}
+
+.skin-navercafe .rp-post:last-child {
+    border-bottom: none;
+}
+
+.skin-navercafe .rp-post:hover {
+    background: rgba(255,255,255,0.02);
+}
+
+.skin-navercafe .rp-post.is-me {
+    background: rgba(124, 111, 159, 0.1);
+}
+
+.skin-navercafe .rp-post-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.skin-navercafe .rp-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 20px;
+    margin-bottom: 3px;
+}
+
+.skin-navercafe .rp-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: #c1c0c1;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.skin-navercafe .rp-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.skin-navercafe .rp-author {
+    font-weight: 700;
+    font-size: 13px;
+    color: #c1c0c1;
+    margin-right: 6px;
+}
+
+.skin-navercafe .rp-author-badge {
+    display: inline-block;
+    width: 41px;
+    height: 14px;
+    border: 1px solid #ff2f3b;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: normal;
+    color: #ff2f3b;
+    text-align: center;
+    line-height: 12px;
+    letter-spacing: -1px;
+}
+
+.skin-navercafe .rp-date {
+    font-size: 11px;
+    color: #c1c0c1;
+    opacity: 0.5;
+    margin-left: 1px;
+}
+
+.skin-navercafe .rp-reply-label {
+    font-size: 11px;
+    color: #c1c0c1;
+    margin-left: 7px;
+    padding-left: 10px;
+    background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyJpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMy1jMDExIDY2LjE0NTY2MSwgMjAxMi8wMi8wNi0xNDo1NjoyNyAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENTNiAoV2luZG93cykiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6NEYwRjI0RjQxQjkyMTFFMjg5NTBGMjhFMTlDMjUzNjciIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6NEYwRjI0RjUxQjkyMTFFMjg5NTBGMjhFMTlDMjUzNjciPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo0RjBGMjRGMjFCOTIxMUUyODk1MEYyOEUxOUMyNTM2NyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDo0RjBGMjRGMzFCOTIxMUUyODk1MEYyOEUxOUMyNTM2NyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PmGFZKcAAABESURBVHjaYvj//z8DEDAw4AeMDP//g2j4fwYQZkRiw2kMIMzEgARwFYAUYBXFVICuAKcCdAU4FWAoQFeArgBdIUCAAQDqYg8R9WfwjAAAAABJRU5ErkJggg==') 0 0 no-repeat;
+}
+
+.skin-navercafe .rp-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.skin-navercafe .rp-content {
+    padding-left: 40px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    font-size: 13px;
+    line-height: 15px;
+    color: #c1c0c1;
+    word-break: break-all;
+}
+
+.skin-navercafe .rp-content-text {
+    outline: none;
+}
+
+.skin-navercafe .rp-content-text:focus {
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+    padding: 4px;
+    margin: -4px;
+}
+
+.skin-navercafe .rp-mention {
+    color: #c1c0c1;
+    opacity: 0.5;
+    margin-right: 4px;
+}
+
+.skin-navercafe .rp-controls {
+    position: absolute;
+    top: 10px;
+    right: 0;
+    display: flex;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.skin-navercafe .rp-post:hover .rp-controls {
+    opacity: 1;
+}
+
+.skin-navercafe .rp-ctrl-btn {
+    font-size: 11px;
+    background: none;
+    border: none;
+    color: #c1c0c1;
+    opacity: 0.7;
+    cursor: pointer;
+    padding: 0;
+}
+
+.skin-navercafe .rp-ctrl-btn:hover {
+    opacity: 1;
+}
+
+.skin-navercafe .rp-ctrl-btn.delete-btn:hover {
+    color: #ff2f3b;
+}
+
+/* 대댓글 */
+.skin-navercafe .rp-reply {
+    margin-left: 40px !important;
+    position: relative;
+}
+
+.skin-navercafe .rp-reply::before {
+    content: 'ㄴ';
+    position: absolute;
+    left: -24px;
+    top: 12px;
+    font-size: 14px;
+    color: #c1c0c1;
+    font-weight: 700;
+}
+
+.skin-navercafe .rp-reply .rp-content {
+    padding-left: 0;
+}
+
+/* 날짜 구분선 */
+.date-divider {
+    text-align: center;
+    padding: 16px 0;
+    position: relative;
+}
+
+.date-divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--skin-border);
+}
+
+.date-divider span {
+    position: relative;
+    background: var(--skin-bg);
+    padding: 0 16px;
+    font-size: 12px;
+    color: var(--skin-text-muted);
+}
+
+/* 채팅형 날짜구분선 */
+.skin-chat .date-divider span {
+    background: #2a2a32;
+    padding: 6px 16px;
+    border-radius: 14px;
+    color: #e8e8e8;
+}
+.skin-chat.skin-light .date-divider span {
+    background: #fff;
+    color: #222;
+}
+
+/* 네이버카페형 날짜구분선 */
+.skin-navercafe .date-divider span {
+    background: #f5f6f8;
+    padding: 6px 16px;
+    border-radius: 4px;
+    color: #666;
+}
+.skin-navercafe.skin-light .date-divider span {
+    background: #f5f6f8;
+    color: #666;
+}
+
+/* Skin theme variables */
+.skin-chat, .skin-default, .skin-navercafe {
+    --skin-bg: #1a1a1f;
+    --skin-bg-card: #232329;
+    --skin-bg-input: #2a2a32;
+    --skin-bg-hover: #2a2a32;
+    --skin-bg-reply: #1e1e24;
+    --skin-bg-me: rgba(124, 111, 159, 0.15);
+    --skin-bg-me-hover: rgba(124, 111, 159, 0.2);
+    --skin-text: #e8e6e3;
+    --skin-text-muted: #6a6a6a;
+    --skin-border: #3a3a42;
+    --skin-border-light: #2a2a32;
+}
+
+.skin-chat.skin-light, .skin-default.skin-light {
+    --skin-bg: #ffffff;
+    --skin-bg-card: #f8f9fa;
+    --skin-bg-input: #f0f0f0;
+    --skin-bg-hover: #fafafa;
+    --skin-bg-reply: #fafafa;
+    --skin-bg-me: #f0f7ff;
+    --skin-bg-me-hover: #e8f2ff;
+    --skin-text: #333333;
+    --skin-text-muted: #999999;
+    --skin-border: #e5e5e5;
+    --skin-border-light: #f0f0f0;
+}
+
+.skin-navercafe.skin-light {
+    background: #fff;
+    --skin-bg: #ffffff;
+    --skin-bg-card: #f8f9fa;
+}
+
+.skin-navercafe.skin-light .rp-main-post {
+    background: #fff;
+}
+
+.skin-navercafe.skin-light .rp-main-author {
+    color: #333;
+}
+
+.skin-navercafe.skin-light .rp-main-date,
+.skin-navercafe.skin-light .rp-main-content {
+    color: #666;
+}
+
+.skin-navercafe.skin-light .rp-main-content {
+    border-top-color: #e5e5e5;
+}
+
+.skin-navercafe.skin-light .rp-comments-section {
+    background: #f8f9fa;
+}
+
+.skin-navercafe.skin-light .rp-post {
+    border-bottom-color: rgba(0,0,0,0.1);
+}
+
+.skin-navercafe.skin-light .rp-author,
+.skin-navercafe.skin-light .rp-date,
+.skin-navercafe.skin-light .rp-content,
+.skin-navercafe.skin-light .rp-mention,
+.skin-navercafe.skin-light .rp-reply-label,
+.skin-navercafe.skin-light .rp-ctrl-btn {
+    color: #333;
+}
+
+/* 공통 */
+.rp-action {
+    color: var(--action-color);
+    font-family: inherit;
+    font-style: normal;
+    font-weight: normal;
+}
+
+.rp-dialogue {
+    color: inherit;
+}
+
+.rp-mention {
+    color: var(--accent-light);
+    font-weight: 500;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+}
+
+.empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.empty-state-text {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.resizer {
+    width: 5px;
+    background: var(--border);
+    cursor: col-resize;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.resizer:hover {
+    background: var(--accent);
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+.hidden-input {
+    display: none;
+}
+
+.tabs {
+    display: flex;
+    gap: 0;
+    background: var(--bg-input);
+    flex-shrink: 0;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+    color: var(--text-secondary);
+}
+
+.tab-btn.active {
+    color: var(--accent-light);
+    border-bottom-color: var(--accent-light);
+    background: var(--bg-card);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Toast notification */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    padding: 12px 24px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+}
+
+.toast.show {
+    opacity: 1;
+}
+
+/* Help Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s;
+}
+
+.modal-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.modal-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.shortcut-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.shortcut-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.shortcut-item:last-child {
+    border-bottom: none;
+}
+
+.shortcut-key {
+    display: flex;
+    gap: 4px;
+}
+
+.shortcut-key kbd {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-primary);
+}
+
+.shortcut-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* Font families */
+.font-default { font-family: 'Noto Sans KR', sans-serif; }
+.font-cafe { font-family: '돋움', dotum, Helvetica, sans-serif; }
+.font-myeongjo { font-family: 'Nanum Myeongjo', serif; }
+.font-gothic { font-family: 'Nanum Gothic', sans-serif; }
+.font-gothica1 { font-family: 'Gothic A1', sans-serif; }
+.font-ibm { font-family: 'IBM Plex Sans KR', sans-serif; }
+
+/* Action font classes */
+.action-font-default .rp-action { font-family: 'Noto Sans KR', sans-serif; }
+.action-font-cafe .rp-action { font-family: '돋움', dotum, Helvetica, sans-serif; }
+.action-font-myeongjo .rp-action { font-family: 'Nanum Myeongjo', serif; }
+.action-font-gothic .rp-action { font-family: 'Nanum Gothic', sans-serif; }
+.action-font-gothica1 .rp-action { font-family: 'Gothic A1', sans-serif; }
+.action-font-ibm .rp-action { font-family: 'IBM Plex Sans KR', sans-serif; }
+
+/* v6: 상단바는 바깥(부모)에서 통합합니다. iframe 내부 헤더는 숨깁니다. */
+.header{display:none !important;}
+body{overflow:auto;}
+.container{height:100vh;}
+
+/* v6: 상단 공통바를 사용하므로, iframe 내부 상단 UI는 숨깁니다. */
+.header{ display:none !important; }
+
+/* v6: iframe 내부가 너무 위로 붙지 않도록 여백 */
+.main-container{ padding-top: 12px !important; }
+
+/* v6: textarea placeholder 대신 실제 값(value) 사용 - 외형은 유지 */
+#inputArea::placeholder{ opacity: 0; }
+
+/* 폰트 사이즈 슬라이더 */
+.font-size-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.font-size-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    width: 50px;
+    flex-shrink: 0;
+}
+.font-size-slider {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+}
+.font-size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+.font-size-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+.font-size-value {
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 35px;
+    text-align: right;
+}
+
+/* 폰트 사이즈 적용 */
+.preview-content .rp-author,
+.preview-content .rp-main-author {
+    font-size: var(--font-size-nick, 13px);
+}
+.preview-content .rp-content-text,
+.preview-content .rp-content {
+    font-size: var(--font-size-content, 13px);
+}
+.preview-content .rp-main-content {
+    font-size: var(--font-size-post, 14px);
+}
+
+/* 채팅형 다크모드 - 웹사이트 테마 무관 (항상 어두운 배경/흰 글씨) */
+.skin-chat:not(.skin-light) {
+    --skin-bg: #1a1a1f !important;
+    --skin-bg-card: #2a2a32 !important;
+    --skin-text: #e8e8e8 !important;
+    --skin-text-muted: #999 !important;
+    --skin-border: #444 !important;
+}
+.skin-chat:not(.skin-light) .rp-post {
+    background: transparent;
+}
+.skin-chat:not(.skin-light) .rp-author {
+    color: #e8e8e8 !important;
+}
+.skin-chat:not(.skin-light) .rp-content {
+    color: #e8e8e8 !important;
+    background: #2a2a32 !important;
+}
+.skin-chat:not(.skin-light) .rp-content-text {
+    color: #e8e8e8 !important;
+}
+.skin-chat:not(.skin-light) .rp-date {
+    color: #999 !important;
+}
+.skin-chat:not(.skin-light) .rp-header {
+    background: #2a2a32;
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    display: inline-flex;
+}
+.skin-chat:not(.skin-light) .rp-author-badge {
+    background: #444;
+    color: #ccc;
+}
+/* 프사 글자색 다크모드 */
+.skin-chat:not(.skin-light) .rp-avatar {
+    color: #e8e8e8 !important;
+}
+
+/* 채팅형 라이트모드 - 웹사이트 테마 무관 (항상 밝은 배경/어두운 글씨) */
+.skin-chat.skin-light {
+    --skin-bg: #f5f5f5 !important;
+    --skin-bg-card: #fff !important;
+    --skin-text: #222 !important;
+    --skin-text-muted: #666 !important;
+    --skin-border: #ddd !important;
+}
+.skin-chat.skin-light .rp-author {
+    color: #222 !important;
+}
+.skin-chat.skin-light .rp-content {
+    color: #222 !important;
+    background: #fff !important;
+}
+.skin-chat.skin-light .rp-content-text {
+    color: #222 !important;
+}
+.skin-chat.skin-light .rp-date {
+    color: #666 !important;
+}
+.skin-chat.skin-light .rp-header {
+    background: #fff;
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    display: inline-flex;
+}
+.skin-chat.skin-light .rp-author-badge {
+    background: #e0e0e0;
+    color: #333;
+}
+/* 프사 글자색 라이트모드 */
+.skin-chat.skin-light .rp-avatar {
+    color: #222 !important;
+}
+
+/* 기본형 라이트모드 글씨색 */
+.skin-default.skin-light {
+    --skin-text: #222 !important;
+    --skin-text-muted: #666 !important;
+}
+.skin-default.skin-light .rp-author,
+.skin-default.skin-light .rp-content-text {
+    color: #222 !important;
+}
+
+/* 네이버카페형 라이트모드 글씨색 */
+.skin-navercafe.skin-light {
+    --skin-text: #222 !important;
+    --skin-text-muted: #666 !important;
+}
+.skin-navercafe.skin-light .rp-author,
+.skin-navercafe.skin-light .rp-content-text,
+.skin-navercafe.skin-light .comment-text {
+    color: #222 !important;
+}
+
+/* 전체 초기화 버튼 */
+.reset-all-btn {
+    width: 100%;
+    padding: 10px;
+    background: #444;
+    border: 1px solid #555;
+    border-radius: 8px;
+    color: #e8e8e8;
+    cursor: pointer;
+    font-size: 13px;
+}
+.reset-all-btn:hover {
+    background: #555;
+}
+body.light-mode .reset-all-btn {
+    background: #e8e8e8;
+    border-color: #ccc;
+    color: #333;
+}
+body.light-mode .reset-all-btn:hover {
+    background: #ddd;
+}
+
+/* 폰트 사이즈 입력 필드 */
+.font-size-input {
+    width: 50px;
+    padding: 4px 6px;
+    border: 1px solid var(--skin-border);
+    border-radius: 4px;
+    background: var(--skin-bg-input);
+    color: var(--skin-text);
+    font-size: 12px;
+    text-align: center;
+}
+.font-size-unit {
+    font-size: 11px;
+    color: var(--skin-text-muted);
+}
+.small-select {
+    padding: 6px 8px;
+    border: 1px solid var(--skin-border);
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 12px;
+}
+.small-select option {
+    background: #fff;
+    color: #333;
+}
+
+/* 줄간격 CSS 변수 적용 */
+.preview-content .rp-content-text,
+.preview-content .rp-body {
+    line-height: var(--line-height-content, 1.6);
+}
+.preview-content .rp-main-content {
+    line-height: var(--line-height-post, 1.8);
+}
+
+/* 행동묘사 스타일 */
+.action-style-italic .rp-action {
+    font-style: italic;
+}
+.action-style-bold .rp-action {
+    font-weight: bold;
+}
+
+/* 이미지 목록 스타일 */
+.image-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.image-item {
+    background: var(--skin-bg-input);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.image-item.has-image {
+    background: rgba(99,102,241,.15);
+    border: 1px solid rgba(99,102,241,.3);
+}
+.image-item-preview {
+    width: 50px;
+    height: 50px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--skin-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.image-item-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: cover;
+}
+.image-item-info {
+    flex: 1;
+    min-width: 0;
+}
+.image-item-text {
+    font-size: 12px;
+    color: var(--skin-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* 이미지 업로드 박스 */
+.rp-image-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(99,102,241,.06);
+    border: 1px dashed rgba(99,102,241,.4);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .2s;
+    margin: 8px 0;
+}
+.rp-image-upload:hover {
+    background: rgba(99,102,241,.12);
+    border-color: rgba(99,102,241,.6);
+}
+.rp-image-upload svg {
+    width: 18px;
+    height: 18px;
+    color: #6366f1;
+    flex-shrink: 0;
+}
+.rp-image-upload .upload-text {
+    font-size: 12px;
+    color: #6366f1;
+}
+
+/* 업로드된 이미지 */
+.rp-image-container {
+    margin: 8px 0;
+}
+.rp-image {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+/* 이미지 목록 아이템 */
+.image-item-author {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
