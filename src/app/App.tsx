@@ -6,7 +6,7 @@ import type { DocumentData } from "../domain/types";
 import { createProject, getDocuments, getProject } from "../storage/repo";
 import { exportProjectFile } from "../exporters/afterlog";
 import { ProjectDrawer } from "./panels/ProjectDrawer";
-import { importProjectFiles } from "../exporters/afterlog";
+import { importProjectFiles, mergeProjectFiles } from "../exporters/afterlog";
 import { Shell } from "./shell/Shell";
 import { useAppTheme } from "./shell/useAppTheme";
 import { PLATFORMS, platformOf, type PlatformId } from "./shell/platforms";
@@ -108,6 +108,30 @@ export function App() {
     return p.id;
   }, [projectId]);
 
+  // .afterlog 열기: 새 사본 프로젝트(new) 또는 지금 프로젝트에 합치기(merge, 같은 글·프로필은 건너뜀)
+  const openProjectFiles = async (files: File[], mode: "new" | "merge") => {
+    if (mode === "merge" && projectId) {
+      await flushAll();
+      const r = await mergeProjectFiles(files, projectId);
+      setRefreshKey((k) => k + 1);
+      await loadProject(projectId);
+      const parts = [
+        `새 글 ${r.added}개`,
+        r.updated ? `더 많이 확보한 글로 갱신 ${r.updated}개` : "",
+        r.skipped ? `이미 있는 글 건너뜀 ${r.skipped}개${r.keptEdited ? `(고친 글이라 그대로 둔 ${r.keptEdited}개 포함)` : ""}` : "",
+        r.profilesAdded ? `프로필 보관본 ${r.profilesAdded}개` : "",
+        r.missingParts.length ? `빠진 파트 ${r.missingParts.join(", ")}번(그 파트의 이미지 없음)` : "",
+      ].filter(Boolean);
+      setNotice({ kind: "ok", text: `지금 프로젝트에 합쳤습니다: ${parts.join(" · ")}.` });
+      return;
+    }
+    const r = await importProjectFiles(files);
+    setRefreshKey((k) => k + 1);
+    await switchProject(r.project.id);
+    if (r.missingParts.length)
+      setNotice({ kind: "error", text: `"${r.project.title}"을(를) 불러왔지만 ${r.partCount}개 파트 중 ${r.missingParts.join(", ")}번 파트가 없어 이미지 ${r.missingAssets}개가 빠졌습니다. 빠진 파트와 함께 다시 불러오면 채워집니다.` });
+  };
+
   const switchProject = useCallback(
     async (id: string | null) => {
       await flushAll();
@@ -179,14 +203,7 @@ export function App() {
             reload={reloadDocs}
             appTheme={theme.resolved}
             registerFlush={registerFlush}
-            onOpenProjectFiles={async (files) => {
-              // 수집 확장·프로젝트 저장 파일(.afterlog): 새 사본 프로젝트로 불러와 연다
-              const r = await importProjectFiles(files);
-              setRefreshKey((k) => k + 1);
-              if (r.missingParts.length)
-                window.alert(`"${r.project.title}"을(를) 불러왔지만 ${r.partCount}개 파트 중 ${r.missingParts.join(", ")}번 파트가 없어 이미지 ${r.missingAssets}개가 빠졌습니다. 빠진 파트와 함께 다시 불러오면 채워집니다.`);
-              await switchProject(r.project.id);
-            }}
+            onOpenProjectFiles={(files, mode) => openProjectFiles(files, mode)}
             onImported={(pid, created) => {
               setRefreshKey((k) => k + 1);
               // 주소를 먼저 새 글로 옮긴 뒤 프로젝트를 다시 읽는다(빈 홈을 거치며 기록이 꼬이지 않게)
@@ -224,6 +241,10 @@ export function App() {
           onNew={() => {
             setDrawer(false);
             void switchProject(null);
+          }}
+          onMerge={(fs) => {
+            setDrawer(false);
+            void openProjectFiles(fs, "merge").catch((e) => setNotice({ kind: "error", text: `합치기 실패: ${(e as Error).message}` }));
           }}
         />
       ) : null}

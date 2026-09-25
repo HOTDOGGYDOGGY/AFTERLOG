@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { strToU8, zipSync, unzipSync, strFromU8 } from "fflate";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as C from "../../src/editor/commands";
-import { exportProjectFile, importProjectFile, importProjectFiles, readProjectFile } from "../../src/exporters/afterlog";
+import { exportProjectFile, importProjectFile, importProjectFiles, mergeProjectFiles, readProjectFile } from "../../src/exporters/afterlog";
 import { analyzeFiles, commitImport } from "../../src/importers/importFiles";
 import { db } from "../../src/storage/db";
 import { ConflictError, createProject, getDocuments, getModuleState, listAssets, listModuleStates, listSources, purgeProject, putModuleState, saveDocument } from "../../src/storage/repo";
@@ -168,5 +168,72 @@ describe("U35 기존 도구 상태의 프로젝트 왕복", () => {
     await putModuleState({ projectId: p.id, moduleId: "cafe", stateVersion: 1, payload: {} });
     await purgeProject(p.id);
     expect(await listModuleStates(p.id)).toEqual([]);
+  });
+});
+
+describe(".afterlog 지금 프로젝트에 합치기", () => {
+  it("같은 글은 건너뛰고 원문·이미지를 새로 더하지 않는다", async () => {
+    const { p } = await importFixture();
+    const { files: [{ blob }] } = await exportProjectFile(p.id);
+    const before = { docs: (await getDocuments(p.id)).length, assets: (await listAssets(p.id)).length, sources: (await listSources(p.id)).length };
+    const r = await mergeProjectFiles(blob, p.id);
+    expect(r).toMatchObject({ added: 0, updated: 0, skipped: 2, sourcesAdded: 0 });
+    expect((await getDocuments(p.id)).length).toBe(before.docs);
+    expect((await listAssets(p.id)).length).toBe(before.assets);
+    expect((await listSources(p.id)).length).toBe(before.sources);
+  });
+
+  it("다른 프로젝트에 합치면 새 글로 더하고 이미지 참조를 맞춘다", async () => {
+    const { p } = await importFixture();
+    const { files: [{ blob }] } = await exportProjectFile(p.id);
+    const q = await createProject("대상");
+    const r = await mergeProjectFiles(blob, q.id);
+    expect(r.added).toBe(2);
+    const docs = await getDocuments(q.id);
+    expect(docs).toHaveLength(2);
+    const ids = new Set((await listAssets(q.id)).map((a) => a.id));
+    for (const d of docs) for (const idn of Object.values(d.identities)) if (idn.avatarAssetId) expect(ids.has(idn.avatarAssetId)).toBe(true);
+    // 두 번 합쳐도 늘지 않는다
+    const again = await mergeProjectFiles(blob, q.id);
+    expect(again.added).toBe(0);
+    expect(await getDocuments(q.id)).toHaveLength(2);
+    expect((await db().projects.get(q.id))!.documentIds).toHaveLength(2);
+  });
+
+  it("댓글이 더 많은 새 자료는 고치지 않은 글만 갱신하고, 고친 글은 그대로 둔다", async () => {
+    const { p } = await importFixture();
+    const { files: [{ blob: full }] } = await exportProjectFile(p.id);
+    // 댓글 하나를 지운 적은 판을 만든다
+    const q = await createProject("적은 판");
+    await mergeProjectFiles(full, q.id);
+    const qPost = (await getDocuments(q.id)).find((d) => d.inputFormat === "band-post")!;
+    const cut = { ...C.deleteEntry(qPost, Object.values(qPost.entries).filter((e) => e.kind !== "post").at(-1)!.id, "with-children"), revision: 1 };
+    await db().documents.put(cut);
+    const n0 = Object.keys(cut.entries).length;
+    const up = await mergeProjectFiles(full, q.id);
+    expect(up.updated).toBe(1);
+    const after = (await getDocuments(q.id)).find((d) => d.inputFormat === "band-post")!;
+    expect(Object.keys(after.entries).length).toBeGreaterThan(n0);
+    expect(after.id).toBe(qPost.id);
+
+    // 사용자가 고친 글(revision 2 이상)은 덮지 않는다
+    const cut2 = { ...C.deleteEntry(after, Object.values(after.entries).filter((e) => e.kind !== "post").at(-1)!.id, "with-children"), revision: 3 };
+    await db().documents.put(cut2);
+    const kept = await mergeProjectFiles(full, q.id);
+    expect(kept).toMatchObject({ updated: 0, keptEdited: 1 });
+    expect(Object.keys((await db().documents.get(cut2.id))!.entries)).toHaveLength(Object.keys(cut2.entries).length);
+  });
+
+  it("수집 확장 파일(프로필 포함)을 두 번 합쳐도 중복이 생기지 않는다", async () => {
+    const file = new Blob([readFileSync("tests/fixtures/afterlog/collector-sample.afterlog")]);
+    const q = await createProject("수집");
+    const first = await mergeProjectFiles(file, q.id);
+    expect(first.added).toBeGreaterThan(0);
+    const nDocs = (await getDocuments(q.id)).length;
+    const nSources = (await listSources(q.id)).length;
+    const second = await mergeProjectFiles(file, q.id);
+    expect(second).toMatchObject({ added: 0, sourcesAdded: 0, profilesAdded: 0 });
+    expect(await getDocuments(q.id)).toHaveLength(nDocs);
+    expect(await listSources(q.id)).toHaveLength(nSources);
   });
 });

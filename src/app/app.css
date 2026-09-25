@@ -2381,3 +2381,61 @@ hr {
   margin: 24px auto 0;
   padding: 0 16px;
 }
+.profile-main {
+  max-width: 980px;
+  margin: 16px auto 0;
+  padding: 0 16px;
+}
+.profile-main-head h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+.profile-main-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.profile-main-tabs button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.profile-main-tabs button.is-on {
+  background: var(--accent, #3b82f6);
+  border-color: transparent;
+  color: #fff;
+}
+.profile-main-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.profile-main-bar .grow {
+  flex: 1;
+}
+.profile-main-frame {
+  width: 100%;
+  height: min(78vh, 900px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.band-empty-col {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding-top: 8px;
+}
+.band-empty-inner.is-secondary {
+  margin: 28px auto 0;
+}
+.band-empty-inner.is-secondary h1 {
+  font-size: 16px;
+  font-weight: 500;
+}

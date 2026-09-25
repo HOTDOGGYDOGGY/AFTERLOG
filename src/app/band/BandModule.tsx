@@ -15,7 +15,7 @@ import { BandHome } from "./BandHome";
 import { DocSession, type BandViewMode } from "./DocSession";
 import { PersonLayer } from "./PersonLayer";
 import { ImportPanel } from "../panels/ImportPanel";
-import { ProfileSnapshots } from "./ProfileSnapshots";
+import { ProfileSnapshots, useProfileSnapshots } from "./ProfileSnapshots";
 import { CaptureReports } from "../panels/CaptureReports";
 import { ExportDialog } from "../panels/ExportDialog";
 import type { AppThemeResolved } from "../../renderers/band/style";
@@ -43,8 +43,8 @@ export function BandModule({
   navigate(r: BandRoute, opts?: { replace?: boolean }): void;
   reload(): Promise<void>;
   onImported(projectId: string, docs: DocumentData[]): void;
-  /** .afterlog 파일을 가져오기 칸에 넣었을 때 프로젝트로 열기 */
-  onOpenProjectFiles?(files: File[]): Promise<void>;
+  /** .afterlog 파일을 가져오기 칸에 넣었을 때: 새 프로젝트로 열기 또는 지금 프로젝트에 합치기 */
+  onOpenProjectFiles?(files: File[], mode: "new" | "merge"): Promise<void>;
   appTheme: AppThemeResolved;
   registerFlush(fn: () => Promise<void>): () => void;
 }) {
@@ -163,6 +163,7 @@ export function BandModule({
           <ImportPanel
             projectId={projectId}
             onOpenProjectFiles={onOpenProjectFiles}
+            mergeTargetTitle={projectId ? projectTitle : null}
             onImported={(pid, created) => {
               setImportOpen(false);
               onImported(pid, created);
@@ -173,17 +174,21 @@ export function BandModule({
     </div>
   ) : null;
 
+  const profileCount = useProfileSnapshots(projectId, captureReports.length)?.length ?? 0;
+
   // ---------- 자료가 없을 때 ----------
   if (!projectId || docs.length === 0) {
     return (
       <div className="band-module" hidden={!active}>
         {importButton}
-        {projectId ? (
-          <div className="band-empty-profiles">
-            <ProfileSnapshots projectId={projectId} refreshKey={captureReports.length} />
-          </div>
-        ) : null}
-        <BandEmpty projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} />
+        <BandEmpty
+          projectId={projectId}
+          profiles={profileCount}
+          refreshKey={captureReports.length}
+          onImported={onImported}
+          onOpenProjectFiles={onOpenProjectFiles}
+          mergeTargetTitle={projectId ? projectTitle : null}
+        />
         {importSheet}
       </div>
     );
@@ -321,18 +326,34 @@ function EscToClose({ onClose }: { onClose(): void }) {
 /** 처음 화면: 파일 열기·붙여넣기 두 동작만 주요 버튼으로(명세 4.3). 가짜 예시 자료를 프로젝트에 넣지 않는다 */
 function BandEmpty({
   projectId,
+  profiles,
+  refreshKey,
   onImported,
   onOpenProjectFiles,
+  mergeTargetTitle,
 }: {
   projectId: string | null;
+  profiles: number;
+  refreshKey?: unknown;
   onImported(pid: string, docs: DocumentData[]): void;
-  onOpenProjectFiles?(files: File[]): Promise<void>;
+  onOpenProjectFiles?(files: File[], mode: "new" | "merge"): Promise<void>;
+  mergeTargetTitle?: string | null;
 }) {
+  if (projectId && profiles > 0)
+    return (
+      <div className="band-empty band-empty-col">
+        <ProfileSnapshots projectId={projectId} refreshKey={refreshKey} variant="main" />
+        <div className="band-empty-inner is-secondary">
+          <h1>이 프로젝트에는 프로필만 있습니다. 글·댓글도 가져올 수 있어요.</h1>
+          <ImportPanel projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} mergeTargetTitle={mergeTargetTitle} variant="start" />
+        </div>
+      </div>
+    );
   return (
     <div className="band-empty">
       <div className="band-empty-inner">
-        <h1>밴드 기록을 가져오세요.</h1>
-        <ImportPanel projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} variant="start" />
+        <h1>{projectId ? "이 프로젝트에는 아직 글·댓글·프로필이 없습니다." : "밴드 기록을 가져오세요."}</h1>
+        <ImportPanel projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} mergeTargetTitle={mergeTargetTitle} variant="start" />
       </div>
     </div>
   );

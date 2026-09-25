@@ -53,3 +53,31 @@ test("파일로 연 로컬 실행판: 첫 화면 '파일 열기'에 수집 확�
   await expect(page.locator(".project-switch")).toContainText("테스트 밴드");
   expect(errors).toEqual([]);
 });
+
+test("프로필만 있는 .afterlog: 프로필이 화면 가운데에 보이고, 다른 파일을 지금 프로젝트에 합칠 수 있다", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(pathToFileURL(INDEX).href);
+  let chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/profile-only.afterlog"));
+  await expect(page.getByRole("heading", { name: /인물 프로필 보관 1명/ })).toBeVisible({ timeout: 15_000 });
+  await expect(page.frameLocator(".profile-main-frame").locator("h1")).toHaveText("가상인물");
+
+  // 같은 프로젝트에 수집 파일 합치기(선택지 → 합치기)
+  chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
+  await page.getByRole("button", { name: /에 합치기/ }).click();
+  await expect(page.locator(".band-card")).toHaveCount(21, { timeout: 15_000 });
+  await expect(page.locator(".profile-snapshots")).toContainText("가상인물");
+
+  // 한 번 더 합쳐도 늘지 않는다(프로젝트 메뉴 → 지금 프로젝트에 합치기)
+  await page.locator(".project-switch").click();
+  chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "지금 프로젝트에 합치기" }).click();
+  await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
+  await expect(page.getByText(/새 글 0개/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".band-card")).toHaveCount(21);
+  expect(errors).toEqual([]);
+});

@@ -15,6 +15,7 @@ export function ProjectDrawer({
   refreshKey,
   onRenamed,
   onNew,
+  onMerge,
 }: {
   currentId: string | null;
   onOpen(id: string): void;
@@ -24,6 +25,8 @@ export function ProjectDrawer({
   onRenamed?(id: string, title: string): void;
   /** 빈 상태로 새로 시작(다음에 자료를 넣으면 임시 이름으로 만들어짐) */
   onNew?(): void;
+  /** 고른 .afterlog를 지금 프로젝트에 합치기 */
+  onMerge?(files: File[]): void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [modules, setModules] = useState<Map<string, string[]>>(new Map());
@@ -90,8 +93,24 @@ export function ProjectDrawer({
             <button type="button" className="ui-btn" disabled={busy} onClick={load}>
               <Icon name="folder" size={14} /> {busy ? "불러오는 중…" : "파일 열기 (.afterlog)"}
             </button>
+            {currentId && onMerge ? (
+              <button
+                type="button"
+                className="ui-btn"
+                disabled={busy}
+                onClick={async () => {
+                  const fs = await pickFiles(".afterlog,.zip", true);
+                  if (fs.length) onMerge(fs);
+                }}
+              >
+                <Icon name="plus" size={14} /> 지금 프로젝트에 합치기
+              </button>
+            ) : null}
           </div>
-          <small className="muted">불러오면 항상 새 사본이 만들어지고 지금 프로젝트는 그대로 남습니다. 여러 파트로 나뉜 파일은 한꺼번에 선택하세요. 수집 확장이 만든 파일도 여기서 엽니다.</small>
+          <small className="muted">
+            '파일 열기'는 새 사본 프로젝트로 엽니다. '지금 프로젝트에 합치기'는 같은 글·프로필 보관본은 건너뛰고(댓글을 더 많이 확보한 새 자료면 갱신, 고친 글은 그대로) 새 것만 더합니다. 여러
+            파트로 나뉜 파일은 한꺼번에 선택하세요.
+          </small>
           {msg ? <p className={`notice ${msg.kind}`}>{msg.text}</p> : null}
           <div className="project-filter">
             <input type="search" placeholder="프로젝트 이름으로 찾기" value={q} onChange={(e) => setQ(e.target.value)} aria-label="프로젝트 찾기" />
