@@ -127,6 +127,14 @@ async function addReason(task: Task, reason: SelectReason, job: Job): Promise<Ca
   return { ...cap, excluded: undefined };
 }
 
+/** 댓글 펼치기 결과 설명 */
+export function expandNote(clicks: number, stop?: string) {
+  if (!clicks) return "펼칠 버튼을 찾지 못함. 삭제·숨김 댓글이 숫자에만 들어 있을 수 있음";
+  if (stop === "timeout") return `'이전 댓글' 펼치기 ${clicks}번 뒤 시간 한도에 걸림. '댓글 모자란 글 다시'로 이어서 펼칠 수 있음`;
+  if (stop === "noProgress") return `'이전 댓글' 펼치기 ${clicks}번 뒤 더 눌러도 늘지 않음. 삭제·숨김 댓글일 수 있음`;
+  return `'이전 댓글' 펼치기 ${clicks}번 뒤 더 누를 버튼이 없음. 삭제·숨김 댓글이 숫자에만 들어 있을 수 있음`;
+}
+
 /** 요청 사이 대기(명세 8.3: 1.5~3초) */
 export function paceDelay(r: number) {
   return MIN_DELAY_MS + r * MIN_DELAY_MS;
@@ -873,7 +881,7 @@ export class Engine {
           leaseUntil: 0,
           errorCode: partial ? "countMismatch" : null,
           errorText: partial
-            ? `표시된 댓글 ${ex.commentsShown}개 중 ${foundComments}개만 확보했습니다(${ex.expandClicks ? `'이전 댓글' 펼치기 ${ex.expandClicks}번 뒤에도 모자람` : "펼칠 버튼을 찾지 못함"}. 삭제·숨김 댓글이거나 불러오지 못한 댓글일 수 있음).`
+            ? `표시된 댓글 ${ex.commentsShown}개 중 ${foundComments}개만 확보했습니다(${expandNote(ex.expandClicks ?? 0, ex.expandStop)}).`
             : null,
           result: { title: doc.title, commentsShown: ex.commentsShown, commentsFound: foundComments, ...judged },
         });

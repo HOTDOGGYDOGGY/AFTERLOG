@@ -114,7 +114,7 @@ export class ChromeBrowser implements CollectorBrowser {
     if (target.tabId !== undefined) tabId = target.tabId;
     else ({ tabId, ms } = await this.navigate(target.url!, "body"));
     const ex = await this.exec<[{ timeoutMs: number; stableMs: number; probes: [string, string][]; expandMs: number }], PostExtraction>(tabId, extractPostInPage, [
-      { timeoutMs: LIMITS.pageTimeoutMs, stableMs: Math.max(750, MIN_DELAY_MS), probes: POST_PROBES, expandMs: LIMITS.pageTimeoutMs * 4 },
+      { timeoutMs: LIMITS.pageTimeoutMs, stableMs: Math.max(750, MIN_DELAY_MS), probes: POST_PROBES, expandMs: LIMITS.expandMs },
     ]);
     // 이동 뒤에 다른 글로 바뀌었으면(프레임 교체 등) 저장하지 않는다(F11)
     if (ex.ok && target.url) {

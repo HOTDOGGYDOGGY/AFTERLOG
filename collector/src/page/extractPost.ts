@@ -24,6 +24,8 @@ export interface PostExtraction {
   /** 접힌 댓글 펼치기: 누른 횟수 · 처음 찾은 버튼 수 */
   expandClicks?: number;
   expandCandidates?: number;
+  /** 펼치기를 멈춘 이유: 다 받음 · 누를 버튼 없음 · 시간 한도 · 눌러도 늘지 않음 */
+  expandStop?: "done" | "noButton" | "timeout" | "noProgress";
 }
 
 export async function extractPostInPage(opts: {
@@ -186,35 +188,59 @@ export async function extractPostInPage(opts: {
   };
   const shown0 = shownOf(card);
   let expandClicks = 0;
+  let expandStop: PostExtraction["expandStop"] = undefined;
   const expandCandidates = expanders(card).length;
-  if (shown0 !== null && card.querySelectorAll(".cComment").length < shown0) {
+  const count = () => card.querySelectorAll(".cComment").length;
+  const sigOf = () => `${count()}:${card.innerHTML.length}`;
+  if (shown0 !== null && count() < shown0) {
+    // 댓글이 수백 개면 수십 번 눌러야 한다. 전체 시간 한도는 넉넉히 두고, 늘지 않는 상태가 이어질 때 멈춘다
     const until = Date.now() + (opts.expandMs ?? 60_000);
-    while (expandClicks < 120 && Date.now() < until) {
-      const found = card.querySelectorAll(".cComment").length;
-      if (found >= shown0) break;
+    let stall = 0;
+    for (;;) {
+      const found = count();
+      if (found >= shown0) {
+        expandStop = "done";
+        break;
+      }
+      if (Date.now() >= until || expandClicks >= 500) {
+        expandStop = "timeout";
+        break;
+      }
       const btn = expanders(card)[0] as HTMLElement | undefined;
-      if (!btn) break;
-      const before = `${found}:${card.innerHTML.length}`;
+      if (!btn) {
+        expandStop = "noButton";
+        break;
+      }
+      if (typeof btn.scrollIntoView === "function") btn.scrollIntoView({ block: "center" });
+      const before = sigOf();
       btn.click();
       expandClicks++;
       let changed = false;
-      for (const t0 = Date.now(); Date.now() - t0 < (opts.expandWaitMs ?? 6000); ) {
-        await sleep(200);
-        if (`${card.querySelectorAll(".cComment").length}:${card.innerHTML.length}` !== before) {
+      for (const t0 = Date.now(); Date.now() - t0 < (opts.expandWaitMs ?? 8000); ) {
+        await sleep(150);
+        if (sigOf() !== before) {
           changed = true;
           break;
         }
       }
-      // 눌러도 바뀌지 않는 버튼은 다시 누르지 않는다. 바뀌었으면 불러오기가 끝날 때까지 잠깐 더 본다
-      if (!changed) tried.add(btn);
-      else {
-        let last = "";
-        for (let i = 0; i < 15; i++) {
-          await sleep(200);
-          const sig = `${card.querySelectorAll(".cComment").length}:${card.innerHTML.length}`;
-          if (sig === last) break;
-          last = sig;
+      if (!changed) {
+        // 눌러도 바뀌지 않는 버튼은 다시 누르지 않는다
+        tried.add(btn);
+      } else {
+        // 불러오기가 끝날 때까지(내용이 0.45초 동안 그대로일 때까지, 최대 4초)
+        let last = sigOf();
+        let same = 0;
+        for (const t0 = Date.now(); same < 3 && Date.now() - t0 < 4000; ) {
+          await sleep(150);
+          const now = sigOf();
+          same = now === last ? same + 1 : 0;
+          last = now;
         }
+      }
+      if (count() > found) stall = 0;
+      else if (++stall >= 6) {
+        expandStop = "noProgress";
+        break;
       }
     }
   }
@@ -254,5 +280,6 @@ export async function extractPostInPage(opts: {
     probeCounts: countProbes(card),
     expandClicks,
     expandCandidates,
+    expandStop,
   };
 }

@@ -68,6 +68,20 @@ test("목록에서 글 찾기 → 순차 수집 → 일부·실패 보고 → .a
   await p.locator("tr", { hasText: "22번 글" }).getByRole("button", { name: "로컬 확인" }).click();
   await expect(p.locator(".capture-preview li").first()).toContainText("22번 글의 첫 줄 대사.");
   await p.getByLabel("원래 화면과 내용이 맞음").check();
+  // 글 제목: 한 번 누르면 전체 내용, 두 번 누르면 밴드에서 원래 글 열기(펼침 상태는 그대로)
+  const title = p.locator("tr", { hasText: "· 20번 글의" }).locator(".post-title");
+  await title.click();
+  // 펼침은 한 번에 한 글
+  await expect(p.locator(".preview-row")).toHaveCount(1);
+  await expect(p.locator(".preview-row")).toContainText("20번 글의 첫 줄 대사.");
+  const popup = ctx.waitForEvent("page");
+  await title.dblclick();
+  const opened = await popup;
+  await opened.waitForLoadState();
+  expect(opened.url()).toContain("/band/424242/post/20");
+  await opened.close();
+  await p.waitForTimeout(400);
+  await expect(p.locator(".preview-row")).toContainText("20번 글의 첫 줄 대사.");
 
   // 진단: 미리보기와 저장 파일이 같고, 본문·이름·주소가 없다(D01·D04)
   await p.getByText("문제 진단 (개발자에게 보낼 파일 만들기)").click();

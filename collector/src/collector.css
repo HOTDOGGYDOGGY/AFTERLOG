@@ -421,3 +421,30 @@ select {
   font-size: 20px;
   margin: 0 2px;
 }
+
+.post-title {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.post-title:hover,
+.post-title[aria-expanded="true"] {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.band-link {
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.preview-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

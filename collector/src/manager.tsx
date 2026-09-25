@@ -775,14 +775,36 @@ function PostRow({ n, task, capture, open, onToggle, job }: { n: number; task: T
     return d.entries.map((e) => ({ id: e.tempId, who: e.authorKey ? names.get(e.authorKey) ?? "?" : "?", reply: e.kind === "comment" && e.parentTempId !== d.entries[0].tempId, text: blocksToPlainText(e.blocks), time: e.time?.raw }));
   }, [open, capture]);
   const c = task.result;
+  // 글 제목: 한 번 누르면 내용 펼치기, 두 번 누르면 밴드에서 열기(두 번 누를 때 펼침이 깜빡이지 않게 한 번 누름은 잠깐 기다렸다 처리)
+  const clickTimer = useRef<number | null>(null);
+  const openBand = () => window.open(task.url, "_blank", "noopener");
   return (
     <>
       <tr className={`st-${task.status}`}>
         <td>{n}</td>
         <td>{TASK_LABEL[task.status]}</td>
-        <td className="ellipsis" title={task.url}>
+        <td className="ellipsis">
           {job.scope === "selection" && task.reasons?.length ? <span className="reason-tags">{task.reasons.map((r) => REASON_LABEL[r]).join(" · ")}</span> : null}
-          {c?.title ?? task.url}
+          <button
+            type="button"
+            className="post-title"
+            title={`한 번 누르면 내용 보기 · 두 번 누르면 밴드에서 열기\n${task.url}`}
+            aria-expanded={open}
+            onClick={() => {
+              if (clickTimer.current) window.clearTimeout(clickTimer.current);
+              clickTimer.current = window.setTimeout(() => {
+                clickTimer.current = null;
+                onToggle();
+              }, 250);
+            }}
+            onDoubleClick={() => {
+              if (clickTimer.current) window.clearTimeout(clickTimer.current);
+              clickTimer.current = null;
+              openBand();
+            }}
+          >
+            {c?.title ?? task.url}
+          </button>
         </td>
         <td>{c?.commentsFound !== undefined ? `${c.commentsShown ?? "?"} / ${c.commentsFound}` : ""}</td>
         <td className="small">
@@ -795,17 +817,32 @@ function PostRow({ n, task, capture, open, onToggle, job }: { n: number; task: T
               {open ? "닫기" : "로컬 확인"}
             </button>
           ) : null}
+          <a className="ui-link small band-link" href={task.url} target="_blank" rel="noreferrer">
+            밴드에서 열기 ↗
+          </a>
         </td>
       </tr>
+      {open && !preview ? (
+        <tr className="preview-row">
+          <td colSpan={5}>
+            <p className="small muted">아직 저장한 내용이 없습니다. 제목을 두 번 누르거나 '밴드에서 열기'로 원래 글을 확인하세요.</p>
+          </td>
+        </tr>
+      ) : null}
       {open && preview ? (
         <tr className="preview-row">
           <td colSpan={5}>
-            <p className="small muted">수집한 내용을 이 컴퓨터에서만 보여 줍니다. 원래 화면과 비교해 맞으면 체크하세요(진단에는 체크 여부만 남습니다).</p>
+            <p className="small muted">
+              수집한 전체 내용을 이 컴퓨터에서만 보여 줍니다(글 1 · 댓글·답글 {preview.length - 1}개). 원래 화면과 비교해 맞으면 체크하세요(진단에는 체크 여부만 남습니다).{" "}
+              <a className="ui-link" href={task.url} target="_blank" rel="noreferrer">
+                밴드에서 원래 글 열기 ↗
+              </a>
+            </p>
             <ol className="capture-preview">
               {preview.map((p) => (
                 <li key={p.id} className={p.reply ? "is-reply" : undefined}>
                   <b>{p.who}</b> <span className="muted small">{p.time}</span>
-                  <div>{p.text.slice(0, 300)}</div>
+                  <div className="preview-text">{p.text}</div>
                 </li>
               ))}
             </ol>

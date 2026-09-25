@@ -21,7 +21,9 @@ export const LIMITS = {
   maxListRounds: 400,
   /** 첨부 동시 처리 */
   assetConcurrency: 2,
-  /** 한 과제의 점유 시간(이 시간이 지나면 멈춘 것으로 보고 다시 대기열로) */
-  leaseMs: 3 * 60 * 1000,
+  /** 한 과제의 점유 시간(이 시간이 지나면 멈춘 것으로 보고 다시 대기열로). 댓글 펼치기 한도보다 길어야 한다 */
+  leaseMs: 12 * 60 * 1000,
+  /** 글 하나에서 접힌 댓글을 펼치는 전체 시간 한도(댓글 수백 개면 수십 번 누른다) */
+  expandMs: 8 * 60 * 1000,
   pageTimeoutMs: typeof __AL_PAGE_TIMEOUT_MS__ !== "undefined" ? __AL_PAGE_TIMEOUT_MS__ : 25_000,
 };
