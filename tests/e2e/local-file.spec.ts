@@ -39,3 +39,17 @@ test("파일로 연 로컬 실행판: 밴드 가져오기·기존 도구·자동
   await expect(page.frameLocator('iframe[title^="카카오톡"]').locator("#input")).toHaveValue(KAKAO, { timeout: 15_000 });
   expect(errors).toEqual([]);
 });
+
+test("파일로 연 로컬 실행판: 첫 화면 '파일 열기'에 수집 확장 .afterlog를 넣어도 프로젝트로 열린다", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(pathToFileURL(INDEX).href);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  const fc = await chooser;
+  expect(await fc.element().getAttribute("accept")).toContain(".afterlog");
+  await fc.setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
+  await expect(page.locator(".band-card")).toHaveCount(21, { timeout: 15_000 });
+  await expect(page.locator(".project-switch")).toContainText("테스트 밴드");
+  expect(errors).toEqual([]);
+});

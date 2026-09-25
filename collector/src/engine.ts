@@ -1002,7 +1002,7 @@ export async function createJob(input: {
       if (sel.commentsOnly || sel.commentedPosts) selLists.push({ url: `${base}/comment`, kind: "comments", reason: "commented", memberKey: m.memberKey });
     }
     // 검색 결과: 사용자가 연 주소를 그대로(검색어·조건을 일반 주소 정리로 잃지 않게, 4.2)
-    if (sel.search) selLists.push({ url: sel.search.url, kind: "list", reason: "search", memberKey: "" });
+    if (sel.search) for (const url of sel.search.urls?.length ? sel.search.urls : [sel.search.url]) selLists.push({ url, kind: "list", reason: "search", memberKey: "" });
   }
   const now = input.now ?? Date.now();
   const job: Job = {

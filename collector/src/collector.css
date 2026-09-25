@@ -448,3 +448,12 @@ select {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.search-detected {
+  margin: -4px 0 4px;
+  padding-left: 2px;
+  color: var(--muted, #667);
+}
+.search-detected .is-bad {
+  color: #b3261e;
+}

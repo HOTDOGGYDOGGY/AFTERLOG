@@ -7,6 +7,7 @@ import { describeStorageError } from "../../storage/db";
 import type { DocumentData } from "../../domain/types";
 import type { LineInfo } from "../../importers/band/text";
 import { pickFiles } from "../download";
+import { AFTERLOG_FORMAT } from "../../archive/format";
 
 const FORMAT_LABEL = { "band-post": "글과 댓글", "band-member-comments": "댓글 모음" } as const;
 const KIND_LABEL = { "band-collector-capture": "수집기", "band-saved-page": "저장 페이지", "band-html-fragment": "HTML 조각", "band-plain-text": "텍스트 복사" } as const;
@@ -33,14 +34,31 @@ function LineReview({ lines }: { lines: LineInfo[] }) {
   );
 }
 
+/** .afterlog 프로젝트 파일인가(확장자, 또는 zip 안의 manifest.json 형식) */
+async function isAfterlogFile(f: File): Promise<boolean> {
+  if (/\.afterlog$/i.test(f.name)) return true;
+  if (!/\.zip$/i.test(f.name)) return false;
+  try {
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const files = unzipSync(new Uint8Array(await f.arrayBuffer()), { filter: (x) => x.name === "manifest.json" });
+    const m = files["manifest.json"];
+    return !!m && JSON.parse(strFromU8(m))?.format === AFTERLOG_FORMAT;
+  } catch {
+    return false;
+  }
+}
+
 export function ImportPanel({
   projectId,
   onImported,
+  onOpenProjectFiles,
   compact,
   variant,
 }: {
   projectId: string | null;
   onImported(projectId: string, docs: DocumentData[]): void;
+  /** .afterlog(수집 확장·프로젝트 저장 파일)를 넣었을 때: 프로젝트로 연다 */
+  onOpenProjectFiles?(files: File[]): Promise<void>;
   compact?: boolean;
   /** start: 처음 화면(파일 열기·붙여넣기 두 동작만 주요 버튼) */
   variant?: "start";
@@ -58,6 +76,14 @@ export function ImportPanel({
     setError(null);
     setBusy(true);
     try {
+      // .afterlog는 밴드 저장 페이지가 아니라 프로젝트 파일: 프로젝트로 연다(수집 확장이 만든 파일 포함)
+      const flags = await Promise.all(files.map(isAfterlogFile));
+      const projectFiles = files.filter((_, i) => flags[i]);
+      if (projectFiles.length) {
+        if (!onOpenProjectFiles) throw new Error(".afterlog 파일은 상단 프로젝트 이름 → '파일 열기 (.afterlog)'로 여세요.");
+        await onOpenProjectFiles(projectFiles);
+        return;
+      }
       const p = await analyzeFiles(files, projectId, pasted);
       setPending(p);
       // 게시글이 하나면 그것을 기본 선택. 여러 개면 임의로 고르지 않고 사용자가 고르게 한다.
@@ -196,14 +222,16 @@ export function ImportPanel({
         }}
       >
         <div className="import-start-actions">
-          <button type="button" className="ui-btn ui-btn-primary ui-btn-large" disabled={busy} onClick={async () => analyze(await pickFiles(".html,.htm,.zip,.txt,image/*"))}>
+          <button type="button" className="ui-btn ui-btn-primary ui-btn-large" disabled={busy} onClick={async () => analyze(await pickFiles(".afterlog,.html,.htm,.zip,.txt,image/*", true))}>
             {busy ? "분석 중…" : "파일 열기"}
           </button>
           <button type="button" className="ui-btn ui-btn-large" aria-expanded={pasteOpen} onClick={() => setPasteOpen(!pasteOpen)}>
             텍스트 붙여넣기
           </button>
         </div>
-        <p className="small muted">밴드 저장 페이지(.html + _files 폴더 또는 .zip) · 게시글 HTML·텍스트 복사(.txt) · 여기로 끌어다 놓아도 됩니다. 파일은 이 브라우저 안에서만 처리됩니다.</p>
+        <p className="small muted">
+          밴드 저장 페이지(.html + _files 폴더 또는 .zip) · 게시글 HTML·텍스트 복사(.txt) · 수집 확장·프로젝트 저장 파일(.afterlog, 여러 파트면 함께 선택) · 여기로 끌어다 놓아도 됩니다. 파일은 이 브라우저 안에서만 처리됩니다.
+        </p>
         {pasteOpen ? (
           <div className="paste-box">
             <label className="field">
@@ -260,7 +288,7 @@ export function ImportPanel({
           <br />
           .html 파일과 같이 생긴 <b>_files 폴더의 이미지</b>를 함께 선택하거나, 둘을 묶은 <b>.zip</b>을 넣으면 프로필·이미지까지 가져옵니다. 게시글 영역 HTML을 복사한 .txt나 화면 텍스트를 복사한 .txt도 됩니다.
         </p>
-        <button type="button" className="ui-btn ui-btn-primary" disabled={busy} onClick={async () => analyze(await pickFiles(".html,.htm,.zip,.txt,image/*"))}>
+        <button type="button" className="ui-btn ui-btn-primary" disabled={busy} onClick={async () => analyze(await pickFiles(".afterlog,.html,.htm,.zip,.txt,image/*", true))}>
           {busy ? "분석 중…" : "파일 선택"}
         </button>
         <p className="small muted">파일은 이 브라우저 안에서만 처리되며 어디로도 전송되지 않습니다.</p>

@@ -49,8 +49,10 @@ export interface Selection {
 }
 
 export interface SearchSelection {
-  /** 검색 결과 화면 주소(검색어·조건이 담긴 주소를 바꾸지 않고 보관) */
+  /** 검색 결과 화면 주소(검색어·조건이 담긴 주소를 바꾸지 않고 보관). 여러 곳이면 첫 주소 */
   url: string;
+  /** 검색 결과 주소 여러 개(없으면 url 하나). 주소마다 목록 과제를 만든다 */
+  urls?: string[];
   /** 로컬 재검증 검색어. 비우면 밴드 검색 결과를 그대로 믿는다 */
   keywords: string[];
   /** any 하나라도 포함(기본) · all 모두 포함(같은 본문 또는 같은 댓글 안에서) */

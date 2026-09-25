@@ -29,6 +29,7 @@ export function BandModule({
   navigate,
   reload,
   onImported,
+  onOpenProjectFiles,
   appTheme,
   registerFlush,
 }: {
@@ -41,6 +42,8 @@ export function BandModule({
   navigate(r: BandRoute, opts?: { replace?: boolean }): void;
   reload(): Promise<void>;
   onImported(projectId: string, docs: DocumentData[]): void;
+  /** .afterlog 파일을 가져오기 칸에 넣었을 때 프로젝트로 열기 */
+  onOpenProjectFiles?(files: File[]): Promise<void>;
   appTheme: AppThemeResolved;
   registerFlush(fn: () => Promise<void>): () => void;
 }) {
@@ -158,6 +161,7 @@ export function BandModule({
           <CaptureReports reports={captureReports} />
           <ImportPanel
             projectId={projectId}
+            onOpenProjectFiles={onOpenProjectFiles}
             onImported={(pid, created) => {
               setImportOpen(false);
               onImported(pid, created);
@@ -173,7 +177,7 @@ export function BandModule({
     return (
       <div className="band-module" hidden={!active}>
         {importButton}
-        <BandEmpty projectId={projectId} onImported={onImported} />
+        <BandEmpty projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} />
         {importSheet}
       </div>
     );
@@ -308,12 +312,20 @@ function EscToClose({ onClose }: { onClose(): void }) {
 }
 
 /** 처음 화면: 파일 열기·붙여넣기 두 동작만 주요 버튼으로(명세 4.3). 가짜 예시 자료를 프로젝트에 넣지 않는다 */
-function BandEmpty({ projectId, onImported }: { projectId: string | null; onImported(pid: string, docs: DocumentData[]): void }) {
+function BandEmpty({
+  projectId,
+  onImported,
+  onOpenProjectFiles,
+}: {
+  projectId: string | null;
+  onImported(pid: string, docs: DocumentData[]): void;
+  onOpenProjectFiles?(files: File[]): Promise<void>;
+}) {
   return (
     <div className="band-empty">
       <div className="band-empty-inner">
         <h1>밴드 기록을 가져오세요.</h1>
-        <ImportPanel projectId={projectId} onImported={onImported} variant="start" />
+        <ImportPanel projectId={projectId} onImported={onImported} onOpenProjectFiles={onOpenProjectFiles} variant="start" />
       </div>
     </div>
   );

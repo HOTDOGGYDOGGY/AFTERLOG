@@ -54,7 +54,9 @@ export function describeSelection(sel: Selection): string {
   }
   if (sel.search) {
     const k = sel.search.keywords;
-    parts.push(k.length ? `검색 결과 중 ${k.map((x) => `'${x}'`).join(sel.search.match === "all" ? "+" : "/")}${sel.search.fields === "bodyAndComments" ? "(본문·댓글)" : ""}` : "검색 결과");
+    const n = sel.search.urls?.length ?? 1;
+    const where = n > 1 ? `검색 결과 ${n}곳` : "검색 결과";
+    parts.push(k.length ? `${where} 중 ${k.map((x) => `'${x}'`).join(sel.search.match === "all" ? "+" : "/")}${sel.search.fields === "bodyAndComments" ? "(본문·댓글)" : ""}` : where);
   }
   const period = sel.periodFrom || sel.periodTo ? ` · ${sel.periodFrom ?? "처음"}~${sel.periodTo ?? "지금"}` : "";
   return `${parts.join(sel.combine === "and" ? " 그리고 " : " · ") || "(선택 없음)"}${period}`;

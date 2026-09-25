@@ -104,6 +104,99 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
 
 /** 작업 하나를 .afterlog 파트들로 */
 export async function exportJob(jobId: string, opts: { maxPartBytes?: number } = {}): Promise<{ parts: ExportedPart[]; documents: number; report: CaptureReport }> {
+  const { job, documents, assets, sources, report, projectId, exportedAt } = await buildJobDocuments(jobId);
+  const project: Project = {
+    id: projectId,
+    title: job.bandName ?? job.label,
+    schemaVersion: SCHEMA_VERSION,
+    createdAt: exportedAt,
+    updatedAt: exportedAt,
+    documentIds: documents.map((d) => d.id),
+    deletedAt: null,
+  };
+  const base = `${safeName(job.bandName ?? job.label)}_수집`;
+  const parts: ExportedPart[] = [];
+  for await (const p of writeArchive(
+    {
+      project,
+      documents,
+      assets,
+      sources,
+      capture: { report, jobs: { jobId: job.id, scope: job.scope, options: job.options, createdVersion: job.createdVersion, lastRunVersion: job.lastRunVersion } },
+      appVersion: COLLECTOR_VERSION,
+      producer: "afterlog-collector",
+      exportedAt,
+    },
+    { maxPartBytes: opts.maxPartBytes ?? job.options.maxPartMB * 1024 * 1024 },
+  )) {
+    const suffix = p.partCount > 1 ? `_part${String(p.partIndex).padStart(2, "0")}of${String(p.partCount).padStart(2, "0")}` : "";
+    parts.push({ blob: new Blob([p.bytes as BlobPart], { type: "application/zip" }), fileName: `${base}${suffix}.afterlog` });
+  }
+  return { parts, documents: documents.length, report };
+}
+
+/**
+ * 작업 하나를 바로 보는 HTML로(앱의 '감상용 HTML'과 같은 렌더러). 이미지는 파일 안에 넣어 인터넷 없이 열린다.
+ * 글이 하나면 HTML 하나, 여러 개면 글마다 HTML + 목차(index.html)를 ZIP 하나로.
+ */
+export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = "light"): Promise<{ file: ExportedPart; documents: number; report: CaptureReport }> {
+  const { job, documents, assets, report, docUrls } = await buildJobDocuments(jobId);
+  if (!documents.length) throw new Error("저장한 글이 없습니다.");
+  const { renderDocumentHtml, usedAssetIds, blobToDataUrl, escapeHtml } = await import("../../src/exporters/html");
+  const byId = new Map(assets.map((a) => [a.id, a]));
+  const dataUrl = new Map<string, string>();
+  const urlsFor = async (doc: DocumentData) => {
+    const m = new Map<string, string>();
+    for (const id of usedAssetIds(doc)) {
+      const a = byId.get(id);
+      if (!a) continue;
+      if (!dataUrl.has(id)) dataUrl.set(id, await blobToDataUrl(a.data as Blob));
+      m.set(id, dataUrl.get(id)!);
+    }
+    return m;
+  };
+  const base = safeName(job.bandName ?? job.label);
+  if (documents.length === 1) {
+    const html = renderDocumentHtml(documents[0], await urlsFor(documents[0]), appTheme);
+    return { file: { blob: new Blob([html], { type: "text/html;charset=utf-8" }), fileName: `${safeName(documents[0].title)}.html` }, documents: 1, report };
+  }
+  const { zipSync, strToU8 } = await import("fflate");
+  const files: Record<string, Uint8Array> = {};
+  const rows: string[] = [];
+  const used = new Set<string>();
+  for (let i = 0; i < documents.length; i++) {
+    const d = documents[i];
+    let name = `${String(i + 1).padStart(3, "0")}_${safeName(d.title).slice(0, 60)}.html`;
+    while (used.has(name)) name = name.replace(/\.html$/, "_.html");
+    used.add(name);
+    files[name] = strToU8(renderDocumentHtml(d, await urlsFor(d), appTheme));
+    const comments = Object.values(d.entries).filter((e) => e.kind !== "post").length;
+    const url = docUrls.get(d.id);
+    rows.push(
+      `<tr><td>${i + 1}</td><td><a href="${encodeURI(name)}">${escapeHtml(d.title)}</a>${d.inputFormat === "band-member-comments" ? " <small>(댓글 모음)</small>" : ""}</td><td>${comments}</td><td>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">밴드에서 열기 ↗</a>` : ""}</td></tr>`,
+    );
+  }
+  const t = report.totals;
+  files["index.html"] = strToU8(`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="AFTERLOG Collector">
+<title>${escapeHtml(job.bandName ?? job.label)} · 목차</title>
+<style>
+:root{color-scheme:light dark}body{font:15px/1.5 system-ui,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;max-width:900px;margin:24px auto;padding:0 16px}
+table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;border-bottom:1px solid #8884;text-align:left;vertical-align:top}td:nth-child(3){white-space:nowrap}
+.muted{opacity:.7;font-size:13px}
+</style></head><body>
+<h1>${escapeHtml(job.bandName ?? job.label)}</h1>
+<p>${t ? `글 ${t.posts}개 · 댓글 ${t.comments}개${t.commentsShown > t.comments ? ` (밴드 표시 ${t.commentsShown}개)` : ""}${t.memberComments ? ` · 인물 댓글 모음 ${t.memberComments}개` : ""}` : ""}</p>
+<p class="muted">AFTERLOG 수집 확장 v${COLLECTOR_VERSION} · ${new Date(report.exportedAt).toLocaleString()} 저장. 제목을 누르면 그 글이 열립니다. 이 파일들은 인터넷 없이 열립니다. 고치거나 다시 내보내려면 같은 작업의 .afterlog 파일을 AFTERLOG에서 여세요.</p>
+<table><thead><tr><th>#</th><th>글</th><th>댓글</th><th>원래 글</th></tr></thead><tbody>
+${rows.join("\n")}
+</tbody></table></body></html>
+`);
+  return { file: { blob: new Blob([zipSync(files, { level: 6 }) as BlobPart], { type: "application/zip" }), fileName: `${base}_HTML.zip` }, documents: documents.length, report };
+}
+
+/** .afterlog와 HTML 저장이 함께 쓰는 문서 만들기(지금 저장된 것만 읽어 일관된 시점으로) */
+async function buildJobDocuments(jobId: string) {
   const job = await cdb().jobs.get(jobId);
   if (!job) throw new Error("작업이 없습니다.");
   // 수집 중에도 일관된 시점으로(명세 11.3): 지금 저장된 것만 읽어서 만든다
@@ -131,6 +224,7 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
 
   const documents: DocumentData[] = [];
   const sources: ArchiveSource[] = [];
+  const docUrls = new Map<string, string>();
   for (const c of caps) {
     const parsed = parseBandHtml(c.html);
     const pd = parsed.documents.find((d) => d.format === "band-post");
@@ -166,6 +260,7 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
     }
     doc.revision = 1;
     documents.push(doc);
+    docUrls.set(doc.id, c.url);
   }
 
   // 인물의 댓글만(B): 인물마다 댓글 모음 문서 하나. 목록이 보여 준 그대로(원글은 목록의 발췌만)이며 다른 사람의 글·댓글 전문은 넣지 않는다(F05)
@@ -210,32 +305,5 @@ export async function exportJob(jobId: string, opts: { maxPartBytes?: number } =
   }
 
   const report = await buildReport(job, tasks, caps, exportedAt, obs);
-  const project: Project = {
-    id: projectId,
-    title: job.bandName ?? job.label,
-    schemaVersion: SCHEMA_VERSION,
-    createdAt: exportedAt,
-    updatedAt: exportedAt,
-    documentIds: documents.map((d) => d.id),
-    deletedAt: null,
-  };
-  const base = `${safeName(job.bandName ?? job.label)}_수집`;
-  const parts: ExportedPart[] = [];
-  for await (const p of writeArchive(
-    {
-      project,
-      documents,
-      assets: [...bySha.values()],
-      sources,
-      capture: { report, jobs: { jobId: job.id, scope: job.scope, options: job.options, createdVersion: job.createdVersion, lastRunVersion: job.lastRunVersion } },
-      appVersion: COLLECTOR_VERSION,
-      producer: "afterlog-collector",
-      exportedAt,
-    },
-    { maxPartBytes: opts.maxPartBytes ?? job.options.maxPartMB * 1024 * 1024 },
-  )) {
-    const suffix = p.partCount > 1 ? `_part${String(p.partIndex).padStart(2, "0")}of${String(p.partCount).padStart(2, "0")}` : "";
-    parts.push({ blob: new Blob([p.bytes as BlobPart], { type: "application/zip" }), fileName: `${base}${suffix}.afterlog` });
-  }
-  return { parts, documents: documents.length, report };
+  return { job, documents, assets: [...bySha.values()], sources, report, projectId, exportedAt, docUrls };
 }

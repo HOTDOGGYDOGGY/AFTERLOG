@@ -286,6 +286,34 @@ describe("내보내기(.afterlog)", () => {
   });
 });
 
+describe("HTML로 저장", () => {
+  it("글이 여러 개면 글마다 HTML + 목차(index.html)를 ZIP 하나로, 앱 없이 열리는 완결 파일", async () => {
+    const b = new FakeBrowser();
+    for (let i = 1; i <= 2; i++) b.pages.set(`https://band.us/band/424242/post/${i}`, () => secretPostHtml(i, { shown: 8 }));
+    const job = await createJob({ scope: "post-urls", label: "t", options: DEFAULT_OPTIONS, bandNo: "424242", posts: [1, 2].map((i) => ({ url: `https://band.us/band/424242/post/${i}`, key: `band:424242:post:${i}` })) });
+    await new Engine({ browser: b, ...clock() }).run(job.id);
+    const { exportJobHtml } = await import("../../collector/src/exporter");
+    const { file, documents } = await exportJobHtml(job.id, "light");
+    expect(documents).toBe(2);
+    expect(file.fileName).toMatch(/_HTML\.zip$/);
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const files = unzipSync(new Uint8Array(await file.blob.arrayBuffer()));
+    const names = Object.keys(files).sort();
+    expect(names).toHaveLength(3);
+    expect(names).toContain("index.html");
+    const index = strFromU8(files["index.html"]);
+    for (const n of names.filter((x) => x !== "index.html")) {
+      expect(index).toContain(encodeURI(n));
+      const html = strFromU8(files[n]);
+      expect(html).toMatch(/^<!DOCTYPE html>/);
+      expect(html).toContain("al-mode-export");
+      expect(html).not.toMatch(/<script/i);
+    }
+    expect(index).toContain("https://band.us/band/424242/post/1");
+    expect(index).toContain("글 2개");
+  });
+});
+
 describe("개발용 진단(개인정보 제외)", () => {
   it("D01·D05 비밀 문자열을 곳곳에 넣은 화면을 수집해도 진단 파일에는 하나도 없다", async () => {
     const b = new FakeBrowser();

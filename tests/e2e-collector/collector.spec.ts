@@ -332,3 +332,32 @@ test("검색 결과(D): 밴드에서 연 검색 결과 '이 검색 결과 저장
   await mgr.close();
   await band.close();
 });
+
+test("검색 결과 주소 여러 개: 넣으면 검색어를 읽어 아래 칸에 채우고, 두 검색 결과의 글을 모은다", async () => {
+  const mgr = await manager();
+  await mgr.getByRole("radio", { name: "인물·검색 선택" }).click();
+  await mgr.getByPlaceholder("밴드 검색 결과 화면의 주소").fill(`${BAND}/search?keyword=${encodeURIComponent("7번")}\n${BAND}/search?keyword=${encodeURIComponent("3번")}`);
+  await expect(mgr.locator(".search-detected li")).toHaveCount(2);
+  await expect(mgr.locator(".search-detected")).toContainText("검색어 '7번' 인식");
+  await expect(mgr.locator(".search-detected")).toContainText("검색어 '3번' 인식");
+  await expect(mgr.getByPlaceholder("검색 주소를 넣으면 자동으로 채워집니다")).toHaveValue("7번, 3번");
+  await mgr.screenshot({ path: `${OUT}/09-multi-search-form.png`, fullPage: true });
+  await mgr.getByRole("button", { name: "수집 시작" }).click();
+  await waitStatus(mgr, /끝남/, 120_000);
+  await expect(mgr.locator(".job-head h2")).toContainText("검색 결과 2곳");
+  // '7번': 17·7, '3번': 13·3
+  await expect(mgr.locator("tbody tr")).toHaveCount(4);
+  await expect(mgr.locator(".stat.wide", { hasText: "검색 결과에서 찾은 글" })).toHaveCount(2);
+  // HTML로 저장: 목차와 글 HTML
+  const dl = mgr.waitForEvent("download");
+  await mgr.getByRole("button", { name: "HTML로 저장" }).click();
+  const d = await dl;
+  const zipPath = resolve(OUT, "multi-search-html.zip");
+  await d.saveAs(zipPath);
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const files = unzipSync(new Uint8Array(readFileSync(zipPath)));
+  expect(Object.keys(files)).toContain("index.html");
+  expect(Object.keys(files)).toHaveLength(5);
+  expect(strFromU8(files["index.html"])).toContain("17번 글의 첫 줄 대사.");
+  await mgr.close();
+});

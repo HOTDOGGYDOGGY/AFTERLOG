@@ -4,7 +4,7 @@ import { ChromeBrowser } from "./chromeBrowser";
 import { COLLECTOR_VERSION } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type SelectedMember, type SelectReason, type Selection, type Task } from "./db";
 import { createJob, DEFAULT_OPTIONS, Engine } from "./engine";
-import { exportJob } from "./exporter";
+import { exportJob, exportJobHtml } from "./exporter";
 import { buildDiagnosticText, deleteDiagnostics, DiagRecorder } from "./diagnostics/recorder";
 import { DIAG_FILE_NAME } from "./diagnostics/serializer";
 import { parseBandUrl, parseMemberUrl, parsePostUrlList, parseSearchUrl, postKey } from "./urls";
@@ -273,6 +273,8 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
   const [mode, setMode] = useState<NewMode>(initialMember || initialSearch ? "person" : initialListUrl ? "list" : "urls");
   const [searchUrl, setSearchUrl] = useState(initialSearch?.url ?? "");
   const [keywords, setKeywords] = useState(initialSearch?.keywords.join(", ") ?? "");
+  // 검색어 칸을 직접 고치기 전까지는 검색 주소에서 읽은 검색어로 자동으로 채운다
+  const [keywordsTouched, setKeywordsTouched] = useState(false);
   const [exclude, setExclude] = useState("");
   const [matchAll, setMatchAll] = useState(false);
   const [withComments, setWithComments] = useState(false);
@@ -297,14 +299,27 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
     return out;
   }, [people]);
   const terms = (x: string) => [...new Set(x.split(/[,\n]/).map((t) => t.trim()).filter(Boolean))];
-  const sq = searchUrl.trim() ? parseSearchUrl(searchUrl) : null;
+  // 검색 결과 주소 여러 개(한 줄에 하나). 주소마다 검색어를 읽는다
+  const searchLines = searchUrl.split(/\s+/).filter(Boolean);
+  const parsedSearch = searchLines.map((line) => ({ line, q: parseSearchUrl(line) }));
+  const goodSearch = parsedSearch.filter((x): x is { line: string; q: NonNullable<ReturnType<typeof parseSearchUrl>> } => !!x.q);
+  const badSearch = parsedSearch.filter((x) => !x.q).length;
+  const detectedKeywords = [...new Set(goodSearch.flatMap((x) => x.q.keywords))];
+  const sq = goodSearch.length ? { url: goodSearch[0].q.url, urls: [...new Set(goodSearch.map((x) => x.q.url))], bandNo: goodSearch[0].q.bandNo } : null;
+  const onSearchUrls = (v: string) => {
+    setSearchUrl(v);
+    if (!keywordsTouched) {
+      const found = [...new Set(v.split(/\s+/).filter(Boolean).flatMap((l) => parseSearchUrl(l)?.keywords ?? []))];
+      setKeywords(found.join(", "));
+    }
+  };
   const postConds = (members.length ? [modes.authored, modes.commentedPosts].filter(Boolean).length : 0) + (sq ? 1 : 0);
   const selection: Selection = {
     members: members.length && (modes.authored || modes.commentsOnly || modes.commentedPosts) ? members : [],
     ...(members.length ? modes : { authored: false, commentsOnly: false, commentedPosts: false }),
     periodFrom: opts.periodFrom,
     periodTo: opts.periodTo,
-    search: sq ? { url: sq.url, keywords: terms(keywords), match: matchAll ? "all" : "any", exclude: terms(exclude), fields: withComments ? "bodyAndComments" : "body" } : null,
+    search: sq ? { url: sq.url, urls: sq.urls, keywords: terms(keywords), match: matchAll ? "all" : "any", exclude: terms(exclude), fields: withComments ? "bodyAndComments" : "body" } : null,
     combine: combineAnd && postConds >= 2 ? "and" : "or",
   };
 
@@ -329,7 +344,7 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
       const job = await createJob({ scope: "list", label: u.kind === "feed" ? "밴드 글 목록" : "멤버 작성글 목록", options: opts, bandNo: u.bandNo, lists: [u.canonical] });
       onCreated(job.id);
     } else {
-      if (searchUrl.trim() && !sq) return setErr("검색 결과 주소는 밴드 안의 주소여야 합니다(밴드에서 검색한 뒤 주소창의 주소).");
+      if (badSearch) return setErr(`검색 결과 주소 ${badSearch}개가 밴드 안의 주소가 아닙니다(밴드에서 검색한 뒤 주소창의 주소를 한 줄에 하나씩).`);
       if (!members.length && !sq) return setErr("인물 프로필 주소(https://band.us/band/숫자/member/…)나 검색 결과 주소를 넣어 주세요. 인물 주소는 밴드에서 인물 사진을 눌러 연 화면의 주소입니다.");
       if (members.length && !modes.authored && !modes.commentsOnly && !modes.commentedPosts) return setErr("인물에 대해 수집할 항목을 하나 이상 골라 주세요.");
       // 선택 수집의 기간은 모드별 기준으로 판단하므로(5절) 일반 기간 조건은 쓰지 않는다
@@ -406,13 +421,44 @@ function NewJob({ onCreated, initialListUrl }: { onCreated(id: string): void; in
           <fieldset className="filter-box">
             <legend>검색어가 들어간 글 (선택)</legend>
             <label className="field">
-              <span>검색 결과 주소 — 밴드에서 검색한 뒤 주소창의 주소</span>
-              <input value={searchUrl} onChange={(e) => setSearchUrl(e.target.value)} placeholder="밴드 검색 결과 화면의 주소" />
+              <span>검색 결과 주소 — 밴드에서 검색한 뒤 주소창의 주소 (한 줄에 하나, 여러 개 가능)</span>
+              <textarea rows={3} value={searchUrl} onChange={(e) => onSearchUrls(e.target.value)} placeholder="밴드 검색 결과 화면의 주소" />
             </label>
+            {parsedSearch.length ? (
+              <ul className="small plain-list search-detected">
+                {parsedSearch.map((x, i) => (
+                  <li key={i} className={x.q ? undefined : "is-bad"}>
+                    주소 {i + 1}: {!x.q ? "밴드 안의 주소가 아님" : x.q.keywords.length ? `검색어 ${x.q.keywords.map((k) => `'${k}'`).join(", ")} 인식` : "검색어를 주소에서 읽지 못함(아래 칸에 직접 넣으세요)"}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="row">
               <label className="field">
-                <span>다시 확인할 검색어 (쉼표로 여러 개, 비우면 밴드 검색 결과를 그대로)</span>
-                <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="예: 등대, 항구" />
+                <span>
+                  다시 확인할 검색어 (쉼표로 여러 개, 비우면 밴드 검색 결과를 그대로)
+                  {detectedKeywords.length && keywordsTouched ? (
+                    <button
+                      type="button"
+                      className="ui-link small"
+                      onClick={() => {
+                        setKeywordsTouched(false);
+                        setKeywords(detectedKeywords.join(", "));
+                      }}
+                    >
+                      {" "}
+                      주소에서 읽은 검색어로 되돌리기
+                    </button>
+                  ) : null}
+                </span>
+                <input
+                  value={keywords}
+                  onChange={(e) => {
+                    setKeywordsTouched(true);
+                    setKeywords(e.target.value);
+                  }}
+                  placeholder="검색 주소를 넣으면 자동으로 채워집니다"
+                />
               </label>
               <label className="field">
                 <span>제외어 (선택)</span>
@@ -559,10 +605,30 @@ function JobView({
       for (const p of parts) download(p.blob, p.fileName);
       setMessage({
         kind: "ok",
-        text: `.afterlog 파일 ${parts.length}개를 받았습니다(문서 ${documents}개 · 글 ${report.posts.captured}개 · 댓글 ${report.totals?.comments ?? 0}개, 결과: ${report.outcome === "complete" ? "선택 범위 확인 완료" : report.outcome === "partial" ? "일부 미확보" : "끝 확인 불가"}). AFTERLOG의 '프로젝트 → 불러오기'에서 ${parts.length > 1 ? "모든 파트를 함께" : ""} 여세요.`,
+        text: `.afterlog 파일 ${parts.length}개를 받았습니다(문서 ${documents}개 · 글 ${report.posts.captured}개 · 댓글 ${report.totals?.comments ?? 0}개, 결과: ${report.outcome === "complete" ? "선택 범위 확인 완료" : report.outcome === "partial" ? "일부 미확보" : "끝 확인 불가"}). AFTERLOG(사이트·로컬 실행판)에서 '파일 열기'로 ${parts.length > 1 ? "모든 파트를 함께 " : ""}여세요.`,
       });
     } catch (e) {
       setMessage({ kind: "error", text: `파일 만들기 실패: ${(e as Error).message}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportHtml = async () => {
+    setBusy(true);
+    try {
+      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+      const { file, documents, report } = await exportJobHtml(job.id, dark ? "dark" : "light");
+      download(file.blob, file.fileName);
+      setMessage({
+        kind: "ok",
+        text:
+          documents > 1
+            ? `HTML ${documents}개와 목차(index.html)를 ZIP으로 받았습니다(글 ${report.posts.captured}개 · 댓글 ${report.totals?.comments ?? 0}개). 압축을 풀고 index.html을 여세요. 인터넷 없이 열립니다.`
+            : `HTML 파일을 받았습니다(댓글 ${report.totals?.comments ?? 0}개). 더블클릭하면 브라우저에서 열립니다.`,
+      });
+    } catch (e) {
+      setMessage({ kind: "error", text: `HTML 만들기 실패: ${(e as Error).message}` });
     } finally {
       setBusy(false);
     }
@@ -735,6 +801,9 @@ function JobView({
         </button>
         <button type="button" className="ui-btn ui-btn-primary" disabled={busy || !caps.length} onClick={exportNow}>
           {job.status === "finished" ? ".afterlog로 저장" : "지금까지 .afterlog로 저장"}
+        </button>
+        <button type="button" className="ui-btn" disabled={busy || !caps.length} onClick={exportHtml} title="앱 없이 브라우저에서 바로 보는 HTML(이미지 포함). 고치거나 다시 내보내려면 .afterlog를 쓰세요">
+          HTML로 저장
         </button>
         <span className="spacer" />
         <button type="button" className="ui-btn is-danger" disabled={running} onClick={removeJob}>

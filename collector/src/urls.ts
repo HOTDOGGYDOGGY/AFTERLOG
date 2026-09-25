@@ -66,7 +66,8 @@ export function parseMemberUrl(raw: string, origins = BAND_ORIGINS): { origin: s
 
 /**
  * 검색 결과 화면 주소. 검색어·조건이 담긴 주소를 바꾸지 않고 그대로 돌려준다(일반 주소 정리로 query를 잃지 않게, 4.2).
- * 실제 검색 주소 형식은 확인 전이라 밴드 안 주소면 받고, 흔한 검색어 매개변수가 있으면 검색어로 읽는다.
+ * 실제 검색 주소 형식은 확인 전이라 밴드 안 주소면 받고, 검색어는 흔한 자리에서 읽는다:
+ * 매개변수(keyword·query·q·searchKeyword 등 이름에 keyword/query/search가 든 것), 주소 끝 #뒤 매개변수, /search/검색어 경로.
  */
 export function parseSearchUrl(raw: string, origins = BAND_ORIGINS): { url: string; bandNo: string; keywords: string[] } | null {
   let u: URL;
@@ -78,6 +79,19 @@ export function parseSearchUrl(raw: string, origins = BAND_ORIGINS): { url: stri
   if (!origins.includes(u.origin)) return null;
   const m = u.pathname.match(/^\/band\/(\d+)(?:\/.*)?$/);
   if (!m) return null;
-  const k = ["keyword", "query", "q", "searchKeyword"].map((p) => u.searchParams.get(p)).find((v) => v && v.trim());
-  return { url: u.href, bandNo: m[1], keywords: k ? [k.trim()] : [] };
+  const found: string[] = [];
+  const take = (params: URLSearchParams) => {
+    for (const [k, v] of params) if (v.trim() && (/^(q|keyword|query|searchKeyword)$/i.test(k) || /keyword|query|search/i.test(k))) found.push(v.trim());
+  };
+  take(u.searchParams);
+  if (u.hash.includes("=")) take(new URLSearchParams(u.hash.replace(/^#\/?/, "").split("?").pop()));
+  const seg = u.pathname.match(/\/search\/([^/]+)\/?$/);
+  if (seg) {
+    try {
+      found.push(decodeURIComponent(seg[1]).trim());
+    } catch {
+      /* 잘못된 인코딩은 무시 */
+    }
+  }
+  return { url: u.href, bandNo: m[1], keywords: [...new Set(found.filter(Boolean))] };
 }

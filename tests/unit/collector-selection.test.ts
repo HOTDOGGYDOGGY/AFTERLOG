@@ -365,3 +365,35 @@ describe("이전 저장본 재사용도 조건 판정", () => {
     expect(p31.result).toMatchObject({ reused: true, matches: [{ where: "body", index: 0, terms: ["31번"] }] });
   });
 });
+
+describe("검색 결과 주소 여러 개", () => {
+  it("주소에서 검색어를 읽는다(매개변수·# 뒤·/search/검색어), 밴드 밖 주소는 거절", async () => {
+    const { parseSearchUrl } = await import("../../collector/src/urls");
+    const O = ["https://band.us"];
+    expect(parseSearchUrl("https://band.us/band/1/search?keyword=%EB%93%B1%EB%8C%80", O)?.keywords).toEqual(["등대"]);
+    expect(parseSearchUrl("https://band.us/band/1/search?query=항구&page=2", O)?.keywords).toEqual(["항구"]);
+    expect(parseSearchUrl("https://band.us/band/1/search#searchKeyword=바다", O)?.keywords).toEqual(["바다"]);
+    expect(parseSearchUrl("https://band.us/band/1/search/%EA%B2%80%EC%88%A0", O)?.keywords).toEqual(["검술"]);
+    expect(parseSearchUrl("https://band.us/band/1/search", O)?.keywords).toEqual([]);
+    expect(parseSearchUrl("https://example.com/band/1/search?keyword=x", O)).toBeNull();
+    // 주소는 바꾸지 않는다
+    expect(parseSearchUrl("https://band.us/band/1/search?query=항구&page=2", O)?.url).toBe(new URL("https://band.us/band/1/search?query=항구&page=2").href);
+  });
+
+  it("주소마다 목록 과제를 만들고, 같은 글은 한 번만 연다", async () => {
+    const urls = [`https://band.us/band/${BAND}/search?keyword=A`, `https://band.us/band/${BAND}/search?keyword=B`];
+    const b = new FakeBand([], []);
+    b.discoverRound = async () => ({
+      links: b.current.endsWith("A") ? [postUrl(41), postUrl(42)] : [postUrl(42), postUrl(43)],
+      scrollHeight: 100,
+      loading: false,
+      atBottom: true,
+      endMarker: false,
+      loginRequired: false,
+    });
+    const { tasks, posts } = await run(sel({ search: { url: urls[0], urls, keywords: [], match: "any", exclude: [], fields: "body" } }), b);
+    expect(tasks.filter((t) => t.kind === "list").map((t) => t.url)).toEqual(urls);
+    expect(posts.map((p) => p.key.split(":").pop()).sort()).toEqual(["41", "42", "43"]);
+    expect(b.opened.filter((n) => n === 42)).toHaveLength(1);
+  });
+});

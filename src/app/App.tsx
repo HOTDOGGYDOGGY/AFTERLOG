@@ -6,6 +6,7 @@ import type { DocumentData } from "../domain/types";
 import { createProject, getDocuments, getProject } from "../storage/repo";
 import { exportProjectFile } from "../exporters/afterlog";
 import { ProjectDrawer } from "./panels/ProjectDrawer";
+import { importProjectFiles } from "../exporters/afterlog";
 import { Shell } from "./shell/Shell";
 import { useAppTheme } from "./shell/useAppTheme";
 import { PLATFORMS, platformOf, type PlatformId } from "./shell/platforms";
@@ -178,6 +179,14 @@ export function App() {
             reload={reloadDocs}
             appTheme={theme.resolved}
             registerFlush={registerFlush}
+            onOpenProjectFiles={async (files) => {
+              // 수집 확장·프로젝트 저장 파일(.afterlog): 새 사본 프로젝트로 불러와 연다
+              const r = await importProjectFiles(files);
+              setRefreshKey((k) => k + 1);
+              if (r.missingParts.length)
+                window.alert(`"${r.project.title}"을(를) 불러왔지만 ${r.partCount}개 파트 중 ${r.missingParts.join(", ")}번 파트가 없어 이미지 ${r.missingAssets}개가 빠졌습니다. 빠진 파트와 함께 다시 불러오면 채워집니다.`);
+              await switchProject(r.project.id);
+            }}
             onImported={(pid, created) => {
               setRefreshKey((k) => k + 1);
               // 주소를 먼저 새 글로 옮긴 뒤 프로젝트를 다시 읽는다(빈 홈을 거치며 기록이 꼬이지 않게)
