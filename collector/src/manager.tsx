@@ -81,7 +81,7 @@ function Manager() {
   }, [reload]);
 
   // ---- 직접 열며 수집: 사용자 탭의 화면 바뀜 알림을 받아 한 번에 하나씩 읽는다 ----
-  const followRef = useRef<{ jobId: string; tabId: number; taskId: string; busy: boolean; again: boolean; last: string } | null>(null);
+  const followRef = useRef<{ jobId: string; tabId: number; taskId: string; busy: boolean; again: boolean; last: string; lastScreen?: string } | null>(null);
   const followNotify = (tabId: number, on: boolean, text: string) => {
     try {
       void chrome.tabs.sendMessage(tabId, { type: "afterlog-follow-state", on, text }).catch(() => undefined);
@@ -105,6 +105,10 @@ function Manager() {
         let out: FollowOutcome;
         try {
           const read = await browserRef.current.readProfileScreen(f.tabId);
+          // 방금 읽은 화면과 똑같으면(하트 애니메이션 등으로 알림만 온 경우) 기록하지 않고 넘어간다
+          const screenKey = `${read.pageUrl}\n${read.html ?? ""}\n${read.postOpen}\n${(read.rawLayers ?? []).map((l) => l.html).join("\n")}`;
+          if (screenKey === f.lastScreen) continue;
+          f.lastScreen = screenKey;
           out = await applyFollowScreen(f.jobId, f.taskId, read, at);
         } catch (e) {
           out = { kind: "error", text: `화면을 읽지 못했습니다: ${(e as Error).message}`, images: [] };

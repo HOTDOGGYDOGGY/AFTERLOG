@@ -494,6 +494,25 @@ test("주소가 그대로인 프로필 팝업: 기본 정보를 읽고 '스토�
   await waitStatus(mgr, /끝남/, 180_000);
   tile = mgr.locator(".stat.wide", { hasText: "프로필" });
   await expect(tile).toContainText("나래");
+  await expect(tile.locator("b")).toHaveText("스토리 0");
+  await mgr.close();
+
+  // '스토리 보기'가 새 탭으로 열리는 인물(세나): 새 탭 주소로 알아내고 그 탭은 닫는다. 사용자 탭은 그대로
+  await band.getByRole("button", { name: "세나" }).click();
+  await expect(bar.getByRole("button", { name: "이 프로필 저장" })).toBeVisible({ timeout: 5000 });
+  mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 프로필 저장" }).click();
+  mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 180_000);
+  tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await expect(tile).toContainText("세나");
+  await expect(tile).not.toContainText("주소를 알 수 없음");
+  await expect(band).toHaveURL(`${BAND}/member`);
+  // 밴드 탭에서 열린 새 탭(사이트가 연 것)은 닫혀 있다
+  const openedByBand = [];
+  for (const p of ctx.pages()) if (!p.isClosed() && (await p.opener()) === band) openedByBand.push(p);
+  expect(openedByBand).toHaveLength(0);
   // 밴드가 '아직 작성된 스토리가 없어요'라고 보여 주면 0개 확인(팝업 수도 0이라 어긋남 없음)
   await expect(tile.locator("b")).toHaveText("스토리 0");
   await expect(tile).not.toContainText("원인 미확인");
@@ -518,6 +537,10 @@ test("직접 열며 수집: 사용자가 연 팝업·프로필·스토리를 한
   // 1) 팝업을 연다 → 기본 정보 저장
   await band.getByRole("button", { name: "다온" }).click();
   await expect(panel.locator(".follow-log")).toContainText("저장: 다온", { timeout: 15_000 });
+  // 1-2) 프로필 사진을 눌러 뜬 사진 보기(아직 해석하지 못하는 화면)는 원문 그대로 보관(이미지 포함)
+  await band.locator("[data-viewname=DProfileLayerView] a._imgAnchor").click();
+  await expect(panel.locator(".follow-log")).toContainText("원문 보관 +1", { timeout: 15_000 });
+  await band.locator(".closeViewer").click();
   // 2) 사용자가 '스토리 보기'를 눌러 프로필 화면으로 → 스토리가 늦게 떠도 따라 읽음
   await band.locator("a._storyAnchor").click();
   await band.waitForURL(/\/member\/MKDAON\/profile$/);
@@ -544,6 +567,17 @@ test("직접 열며 수집: 사용자가 연 팝업·프로필·스토리를 한
   const dl = mgr.waitForEvent("download");
   await mgr.getByRole("button", { name: /\.afterlog로 저장/ }).click();
   await (await dl).saveAs(resolve(OUT, "follow.afterlog"));
+  {
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const files = unzipSync(new Uint8Array(readFileSync(resolve(OUT, "follow.afterlog"))));
+    const manifest = JSON.parse(strFromU8(files["manifest.json"]));
+    const raw = manifest.sources.find((x: { kind?: string }) => x.kind === "band-profile-raw");
+    expect(raw).toBeTruthy();
+    const rawHtml = strFromU8(files[raw.path]);
+    expect(rawHtml).toContain("이전 프로필 사진 2장");
+    expect(rawHtml).toContain("data:image/");
+    expect(rawHtml).not.toMatch(/<script/i);
+  }
   await mgr.close();
   await band.close();
 });

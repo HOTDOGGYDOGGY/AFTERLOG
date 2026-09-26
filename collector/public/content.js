@@ -138,6 +138,10 @@
     for (var j = 0; j < ds.length; j++)
       if (vis(ds[j])) parts.push("detail:" + ((ds[j].querySelector("time") || {}).textContent || "") + ":" + ds[j].querySelectorAll(".cComment").length + ":" + ((ds[j].querySelector(".txtBody") || {}).textContent || "").length);
     parts.push("photos:" + document.querySelectorAll("[data-viewname='DBandMemberPhotoListItemView']").length);
+    // 열린 레이어(해석 못 하는 화면 포함: 예 프로필 사진 보기)의 구조 이름과 이미지 수
+    var ls = document.querySelectorAll("section.lyWrap, div.lyWrap, [role='dialog'], [aria-modal='true'], [data-viewname$='LayerView'], [data-viewname*='Viewer']");
+    for (var k = 0; k < ls.length; k++)
+      if (vis(ls[k]) && !host.contains(ls[k])) parts.push("layer:" + (ls[k].getAttribute("data-viewname") || ls[k].className) + ":" + ls[k].querySelectorAll("img").length);
     return parts.join("|");
   }
   function checkScreen() {

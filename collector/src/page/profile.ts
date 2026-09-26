@@ -31,6 +31,10 @@ export interface ProfileExtraction {
   storyDetails?: { opened: number; listed: number; mismatched: number; notClosed: number; commentClicks: number; stoppedEarly: boolean };
   /** 진단용: 확인 위치별 개수(스크롤 후, 상세를 열기 전 화면) */
   probeCounts?: Record<string, number>;
+  /** 읽는 동안 페이지가 '숨김' 상태였던 적이 있는가(다른 창에 가려진 창은 밴드가 목록을 늦게/안 불러올 수 있음) */
+  hiddenSeen?: boolean;
+  /** 창을 앞으로 가져와 다시 읽었는가(첫 읽기에서 스토리 0개였을 때) */
+  rechecked?: { listedBefore: number; listedAfter: number };
 }
 
 export async function captureProfileInPage(opts: {
@@ -50,6 +54,11 @@ export async function captureProfileInPage(opts: {
   const txt = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const base = { pageUrl: location.href, name: null, description: null, html: null, css: "", cssTruncated: false, imageUrls: [], stories: [], scrollRounds: 0 };
   if (/(^|\.)auth\.band\.us$/.test(location.hostname) || document.querySelector("input[type=password]")) return { ...base, ok: false, reason: "login" };
+  let hiddenSeen = document.visibilityState === "hidden";
+  const onVis = () => {
+    if (document.visibilityState === "hidden") hiddenSeen = true;
+  };
+  document.addEventListener("visibilitychange", onVis);
 
   const pickRoot = () => document.querySelector("main#content, #content, [role='main'], .midContent, main") ?? document.body;
   // 처음 그려질 때까지
@@ -65,6 +74,7 @@ export async function captureProfileInPage(opts: {
   };
   for (const t0 = Date.now(); Date.now() - t0 < opts.readyMs && (storyState() === "loading" || storyState() === "none"); ) {
     await sleep(250);
+    onVis();
     if (storyState() === "none" && Date.now() - t0 > 4000) break;
   }
   if (storyState() === "empty") for (let i = 0; i < 10 && storyState() === "empty"; i++) await sleep(300);
@@ -220,7 +230,7 @@ export async function captureProfileInPage(opts: {
     : null;
 
   const root = pickRoot();
-  if (txt(root).length < 2) return { ...base, ok: false, reason: "empty", scrollRounds: rounds, structureHtml, storyDetails: sd, probeCounts };
+  if (txt(root).length < 2) return { ...base, ok: false, reason: "empty", scrollRounds: rounds, structureHtml, storyDetails: sd, probeCounts, hiddenSeen };
 
   // ---- 복제·정리 ----
   const abs = (u: string) => {
@@ -356,5 +366,6 @@ export async function captureProfileInPage(opts: {
     structureHtml,
     storyDetails: sd,
     probeCounts,
+    hiddenSeen,
   };
 }

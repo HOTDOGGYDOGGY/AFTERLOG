@@ -5,6 +5,10 @@
 export interface PopupMemberResult {
   ok: boolean;
   reason?: "none" | "multiple" | "noLink" | "noChange";
+  /** 어떻게 알아냈나: 같은 탭 주소 · 새 탭 · 같은 주소의 레이어 안 링크 */
+  how?: "sameTab" | "newTab" | "layer";
+  /** 시도한 링크와 결과(진단용) */
+  attempts?: { via: "story" | "posts"; outcome: "sameTab" | "newTab" | "layer" | "noChange" | "noLink" | "gone" }[];
   /** 이동한 주소(인물 식별자가 들어 있음) */
   memberUrl: string | null;
   via: "story" | "posts" | null;
@@ -12,7 +16,7 @@ export interface PopupMemberResult {
   startUrl: string;
 }
 
-export async function resolvePopupMemberInPage(opts: { timeoutMs: number }): Promise<PopupMemberResult> {
+export async function resolvePopupMemberInPage(opts: { timeoutMs: number; prefer: "story" | "posts" }): Promise<PopupMemberResult> {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const txt = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
   const startUrl = location.href;
@@ -32,13 +36,28 @@ export async function resolvePopupMemberInPage(opts: { timeoutMs: number }): Pro
   const name = txt(layer.querySelector(".cProfileViewCard .userName, .userName")) || null;
   const story = layer.querySelector("[data-viewname='DProfileStoryCountView'] a._storyAnchor, a.profileStoryMoveButton") as HTMLElement | null;
   const posts = layer.querySelector("[data-viewname='DProfileNavView'] a._btnGotoSearchMemberContent, a.writePost._btnGotoSearchMemberContent") as HTMLElement | null;
-  const target = story && visible(story) ? story : posts && visible(posts) ? posts : null;
+  const okStory = story && visible(story) ? story : null;
+  const okPosts = posts && visible(posts) ? posts : null;
+  const target = opts.prefer === "posts" ? okPosts : okStory ?? okPosts;
   if (!target) return { ...base, name, ok: false, reason: "noLink" };
-  const via = target === story ? "story" : "posts";
+  const via = target === okStory ? "story" : "posts";
+  // 누르기 전부터 있던 인물 링크는 근거로 쓰지 않는다(배경 목록 등)
+  const memberLink = /\/band\/\d+\/member\/(?!#)[^/?#]+/;
+  const before = new Set(Array.from(document.querySelectorAll("a[href]")).map((a) => (a as HTMLAnchorElement).href).filter((h) => memberLink.test(h)));
   target.click();
   for (const t0 = Date.now(); Date.now() - t0 < opts.timeoutMs; ) {
     await sleep(150);
-    if (location.href !== startUrl && /\/member\/[^/?#]+/.test(location.pathname)) return { ok: true, memberUrl: location.href, via, name, startUrl };
+    if (location.href !== startUrl && /\/member\/[^/?#]+/.test(location.pathname)) return { ok: true, memberUrl: location.href, via, name, startUrl, how: "sameTab" };
+    // 주소는 그대로인데 스토리·프로필이 레이어로 열린 경우: 새로 생긴 레이어 안의 인물 링크(이름이 같을 때만)
+    const layers = Array.from(document.querySelectorAll("[data-viewname='DProfileStoryDetailLayerView'], [data-viewname='DProfileView'], [data-viewname='DProfileStoryListView']")).filter(visible);
+    for (const l of layers) {
+      const who = (l.querySelector(".userName, .profileStoryDetailWriterBox em")?.textContent ?? "").replace(/\s+/g, "");
+      if (name && who && who !== name.replace(/\s+/g, "")) continue;
+      const link = Array.from(l.querySelectorAll("a[href]"))
+        .map((a) => (a as HTMLAnchorElement).href)
+        .find((h) => memberLink.test(h) && !before.has(h));
+      if (link) return { ok: true, memberUrl: link, via, name, startUrl, how: "layer" };
+    }
   }
   return { ...base, name, via, ok: false, reason: "noChange" };
 }

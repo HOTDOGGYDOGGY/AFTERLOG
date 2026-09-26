@@ -13,7 +13,7 @@ import { bandMemberKey, isBandProfileRecord, mergeProfileRecords, type BandProfi
 import { sha256Hex } from "../storage/hash";
 
 export { ProjectFileError };
-export const APP_VERSION = "0.4.2";
+export const APP_VERSION = "0.4.3";
 
 /**
  * includeSources=false: 공유용 사본. 원본 HTML/텍스트(로그인 정보·주변 화면이 섞일 수 있음)를 빼고
@@ -403,6 +403,11 @@ export async function planMerge(files: Blob | Blob[], targetProjectId: string): 
   for (const x of candSources) {
     const kind = String(x.kind ?? "");
     if (kind === PROFILE_DATA) continue;
+    // 원문만 보관한 화면: 같은 바이트는 위에서 건너뛰었고, 나머지는 프로필 자료에 딸린 것이라 더한다
+    if (kind === "band-profile-raw") {
+      addSources.push(x);
+      continue;
+    }
     if (kind === PROFILE_SNAPSHOT) {
       const pd = pairedData(x);
       if (!pd || keptProfileData.has(pd.id)) addSources.push(x);

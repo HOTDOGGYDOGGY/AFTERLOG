@@ -113,6 +113,11 @@ export interface BandProfileRecord extends BandProfileBasics {
     /** 목록 끝: 더 불러와지지 않을 때까지 스크롤(noProgress) · 저장 페이지라 확인 못 함(notChecked) */
     end?: "noProgress" | "notChecked";
   };
+  /**
+   * 원문만 보관한 화면(아직 해석하지 못하는 레이어, 예: 프로필 사진 보기). 본문은 .afterlog 원문 칸의 band-profile-raw HTML(fileName으로 찾음).
+   * scope: 같은 화면에서 대상 인물을 확인함(confirmed) · 대상 확인 없이 '직접 열며 수집' 중 연 화면(unverified)
+   */
+  rawArchives?: { at: string | null; label: string; fileName: string; images: number; scope: "confirmed" | "unverified"; hash: string }[];
   /** 앞선 관측(합치기에서 기본 정보가 바뀌면 여기 남긴다) */
   history?: BandProfileBasics[];
   notes: string[];
@@ -556,7 +561,8 @@ export function memberPhotosStatus(r: BandProfileRecord): SectionStatus {
 export function photoHistoryStatus(r: BandProfileRecord): SectionStatus {
   if (r.photoHistory.state === "collected") return { text: `사진 이력 ${r.photoHistory.items.length}장`, tone: "ok", needsMore: false };
   if (r.photoHistory.state === "none") return { text: "사진 이력 0장 확인", tone: "muted", needsMore: false };
-  return { text: "프로필 사진 이력 구조 미확인(현재 사진만 저장)", tone: "warn", needsMore: false };
+  const raws = r.rawArchives?.length ?? 0;
+  return { text: `프로필 사진 이력 구조 미확인(현재 사진만 저장)${raws ? ` · 해석 못 한 화면 ${raws}개는 원문 그대로 보관` : ""}`, tone: "warn", needsMore: false };
 }
 
 /** 프로필 요약 한 줄(목록·알림·HTML 목차) */
@@ -591,8 +597,9 @@ export interface ProfileMergeResult {
   /** 목록 글 → 상세 전문 보완 */
   textsCompleted: number;
   basicsChanged: boolean;
-  /** 사진첩에 더한 사진 수 */
+  /** 사진첩에 더한 사진 수 · 새로 원문 보관한 화면 수 */
   photosAdded: number;
+  rawAdded: number;
   changed: boolean;
 }
 
@@ -668,17 +675,20 @@ export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileReco
     }
   const photoStates = [old.memberPhotos?.state, inc.memberPhotos?.state];
   const memberPhotos: BandProfileRecord["memberPhotos"] = photoItems.length ? { state: "collected", items: photoItems, end: inc.memberPhotos?.end ?? old.memberPhotos?.end } : photoStates.includes("none") ? { state: "none", items: [] } : (old.memberPhotos ?? inc.memberPhotos);
+  const rawAdded = (inc.rawArchives ?? []).filter((r) => !(old.rawArchives ?? []).some((o) => o.hash === r.hash));
+  const rawArchives = [...(old.rawArchives ?? []), ...rawAdded];
   const rank = { profilePage: 3, profilePopup: 2, memberPage: 1 } as const;
   const record: BandProfileRecord = {
     ...old,
     ...basics,
     memberPhotos,
+    ...(rawArchives.length ? { rawArchives } : {}),
     surface: rank[inc.surface] > rank[old.surface] ? inc.surface : old.surface,
     storyCountShown: (newer ? inc.storyCountShown : old.storyCountShown) ?? old.storyCountShown ?? inc.storyCountShown,
     stories: { state: storyState, items, observations: mergedObs },
     history: history.length ? history : undefined,
     notes: [...new Set([...old.notes, ...inc.notes])],
   };
-  const changed = basicsChanged || photosAdded > 0 || (old.memberPhotos?.state ?? null) !== (memberPhotos?.state ?? null) || storiesAdded > 0 || commentsAdded > 0 || textsCompleted > 0 || JSON.stringify(old.stories.items.map((s) => [s.reactionsShown, s.commentsShown])) !== JSON.stringify(items.slice(0, old.stories.items.length).map((s) => [s.reactionsShown, s.commentsShown]));
-  return { record, storiesAdded, commentsAdded, textsCompleted, basicsChanged, photosAdded, changed };
+  const changed = basicsChanged || rawAdded.length > 0 || photosAdded > 0 || (old.memberPhotos?.state ?? null) !== (memberPhotos?.state ?? null) || storiesAdded > 0 || commentsAdded > 0 || textsCompleted > 0 || JSON.stringify(old.stories.items.map((s) => [s.reactionsShown, s.commentsShown])) !== JSON.stringify(items.slice(0, old.stories.items.length).map((s) => [s.reactionsShown, s.commentsShown]));
+  return { record, storiesAdded, commentsAdded, textsCompleted, basicsChanged, photosAdded, rawAdded: rawAdded.length, changed };
 }

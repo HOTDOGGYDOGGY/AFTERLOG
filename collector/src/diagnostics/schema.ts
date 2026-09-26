@@ -3,7 +3,7 @@
 
 // 2: 개수 구간에 unknown 추가(C05), scopeMissing 오류 코드 추가(C04)
 // 3: 접힌 댓글 펼치기 단계(expand)와 remaining·candidates 구간 추가
-export const DIAG_SCHEMA_VERSION = 5;
+export const DIAG_SCHEMA_VERSION = 6;
 export const ADAPTER_VERSION = "band-web-1";
 export const PROBE_SUITE_VERSION = "band-post-1";
 
@@ -55,6 +55,13 @@ export const ERROR_CODES = [
   "expand_noProgress",
   "expand_cardLost",
   "keptEarlier",
+  "pageHidden",
+  "recheckVisible",
+  "popupSameTab",
+  "popupNewTab",
+  "popupLayer",
+  "popupNoChange",
+  "popupNoLink",
   "other",
 ] as const;
 export const FIELD_KEYS = [

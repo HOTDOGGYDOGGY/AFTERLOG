@@ -235,6 +235,8 @@ export interface ProfileCapture {
   record?: BandProfileRecord | null;
   /** 어디서 읽었나: 프로필 페이지 · 사용자 탭의 팝업 */
   surface?: "profilePage" | "profilePopup";
+  /** 원문만 보관한 화면(해석 못 한 레이어). 내보낼 때 band-profile-raw HTML로 */
+  raws?: { fileName: string; label: string; at: string; html: string; imageUrls: string[]; hash: string; scope: "confirmed" | "unverified" }[];
 }
 
 export type AssetStatus = "pending" | "stored" | "failed" | "unavailable" | "notRequested" | "unsupported";

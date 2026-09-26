@@ -4,7 +4,7 @@
 // - 해석하지 못하는 화면은 저장하지 않고 그렇다고 알린다(구조화 완료로 세지 않음).
 import { cdb, type FollowKind, type FollowState, type ProfileCapture } from "./db";
 import { COLLECTOR_VERSION } from "./config";
-import { bandProfileUrl, memberPhotosStatus, mergeProfileRecords, parseBandProfileDocument, photoHistoryStatus, profileImages, profileNeedsMore, storyStatus, type BandProfileRecord } from "../../src/importers/band/profile";
+import { bandProfileUrl, parseBandMemberAnyPath, memberPhotosStatus, mergeProfileRecords, parseBandProfileDocument, photoHistoryStatus, profileImages, profileNeedsMore, storyStatus, type BandProfileRecord } from "../../src/importers/band/profile";
 import type { ProfileScreenRead } from "./page/profileScreen";
 
 const norm = (s: string | null | undefined) => (s ?? "").normalize("NFC").replace(/\s+/g, "");
@@ -31,6 +31,8 @@ export async function applyFollowScreen(jobId: string, taskId: string, read: Pro
   if (read.loginRequired) return { kind: "login", text: "로그인 화면입니다. 밴드에 로그인한 뒤 다시 여세요.", images: [] };
   const recs = read.html ? parseBandProfileDocument(new DOMParser().parseFromString(read.html, "text/html"), { pageUrl: read.pageUrl, observedAt }) : [];
   const rec = recs.sort((a, b) => RANK[b.surface] - RANK[a.surface])[0];
+  // 해석하지 못하는 레이어(예: 프로필 사진 보기)는 원문 그대로 보관. 같은 화면에서 대상 인물이 확인되지 않으면 'unverified'
+  if (!rec && read.rawLayers?.length) return saveRawOnly(jobId, taskId, read, observedAt);
   if (!rec) {
     if (read.postOpen) return { kind: "post", text: "게시글 화면입니다. 글은 막대의 '이 글 저장'으로 저장하세요(이 모드는 프로필·스토리·사진첩).", images: [] };
     return { kind: "notProfile", text: "프로필·스토리·사진첩 화면이 아니라 저장하지 않았습니다.", images: [] };
@@ -65,6 +67,13 @@ export async function applyFollowScreen(jobId: string, taskId: string, read: Pro
     ].filter(Boolean);
     text = changed ? `보탬: ${parts.join(" · ") || "상태 갱신"}` : "변화 없음(이미 저장한 내용, 중복 건너뜀)";
   }
+  // 같은 화면에 함께 열린 해석 못 한 레이어는 대상 확인됨으로 붙인다
+  const newRaws = rawEntries(read, observedAt, "confirmed", old?.raws ?? []);
+  if (newRaws.length) {
+    record = { ...record, rawArchives: [...(record.rawArchives ?? []), ...newRaws.map(rawRef)] };
+    changed = true;
+    text = `${text} · 원문 보관 +${newRaws.length}(구조 미해석 화면)`;
+  }
   const target = follow.target ?? { bandNo: rec.bandNo, memberKey: rec.memberKey, name: rec.name };
   if (!target.memberKey && record.memberKey) Object.assign(target, { bandNo: record.bandNo, memberKey: record.memberKey });
   if (!changed) {
@@ -83,14 +92,15 @@ export async function applyFollowScreen(jobId: string, taskId: string, read: Pro
     html: old?.html ?? "",
     css: "",
     cssTruncated: false,
-    imageUrls: [...new Set([...(old?.imageUrls ?? []), ...read.imageUrls])],
+    imageUrls: [...new Set([...(old?.imageUrls ?? []), ...read.imageUrls, ...newRaws.flatMap((r) => r.imageUrls)])],
+    raws: [...(old?.raws ?? []), ...newRaws],
     stories: [],
     capturedAt: observedAt,
     collectorVersion: COLLECTOR_VERSION,
     record,
     surface: RANK[record.surface] >= 2 ? (record.surface as "profilePage" | "profilePopup") : "profilePopup",
   };
-  const images = [...new Set(profileImages(record).map((i) => i.src).filter((u) => /^https?:/.test(u)))];
+  const images = [...new Set([...profileImages(record).map((i) => i.src).filter((u) => /^https?:/.test(u)), ...newRaws.flatMap((r) => r.imageUrls)])];
   await cdb().transaction("rw", [cdb().profiles, cdb().tasks, cdb().jobs], async () => {
     await cdb().profiles.put(cap);
     const more = profileNeedsMore(record);
@@ -126,4 +136,45 @@ export async function logFollow(jobId: string, kind: FollowKind, text: string, a
       ? [{ at, kind, text: `${text} ×${(Number(first.text.match(/ ×(\d+)$/)?.[1]) || 1) + 1}` }, ...rest]
       : [{ at, text, kind }, ...f.log].slice(0, 30);
   await cdb().jobs.update(jobId, { options: { ...job.options, follow: { ...f, log } } });
+}
+
+/** 문자열 지문(같은 화면 중복 확인용, 보안 목적 아님) */
+function fingerprint(s: string) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(16) + ":" + s.length;
+}
+
+type RawEntry = NonNullable<ProfileCapture["raws"]>[number];
+
+function rawEntries(read: ProfileScreenRead, at: string, scope: RawEntry["scope"], have: RawEntry[]): RawEntry[] {
+  const out: RawEntry[] = [];
+  for (const l of read.rawLayers ?? []) {
+    const hash = fingerprint(l.html);
+    if (have.some((h) => h.hash === hash) || out.some((h) => h.hash === hash)) continue;
+    const n = have.length + out.length + 1;
+    out.push({ fileName: `원문_${l.label.replace(/[^A-Za-z0-9가-힣]+/g, "")}_${n}.html`, label: l.label, at, html: l.html, imageUrls: l.imageUrls, hash, scope });
+  }
+  return out;
+}
+
+const rawRef = (r: RawEntry) => ({ at: r.at, label: r.label, fileName: r.fileName, images: r.imageUrls.length, scope: r.scope, hash: r.hash });
+
+/**
+ * 해석할 수 있는 인물 화면 없이 레이어만 열린 경우(예: 프로필 사진을 눌러 뜬 사진 보기).
+ * 이미 이 작업에 인물이 있을 때만, 주소의 인물이 대상과 다르지 않을 때만 '대상 확인 안 됨'으로 붙인다.
+ */
+async function saveRawOnly(jobId: string, taskId: string, read: ProfileScreenRead, at: string): Promise<FollowOutcome> {
+  const job = await cdb().jobs.get(jobId);
+  const follow = job?.options.follow;
+  const old = await cdb().profiles.where("taskId").equals(taskId).first();
+  if (!job || !follow || !old?.record) return { kind: "notProfile", text: "해석하지 못하는 화면입니다. 먼저 저장할 인물의 팝업이나 프로필 화면을 연 뒤 여세요.", images: [] };
+  const m = parseBandMemberAnyPath(read.pageUrl);
+  if (m && follow.target?.memberKey && m.memberKey !== follow.target.memberKey) return { kind: "outOfScope", text: `범위 밖이라 저장하지 않음: 다른 인물의 화면. 대상: ${follow.target.name ?? "?"}`, images: [] };
+  const raws = rawEntries(read, at, "unverified", old.raws ?? []);
+  if (!raws.length) return { kind: "same", text: "변화 없음(이미 보관한 화면, 중복 건너뜀)", images: [] };
+  const record: BandProfileRecord = { ...old.record, rawArchives: [...(old.record.rawArchives ?? []), ...raws.map(rawRef)] };
+  const images = raws.flatMap((r) => r.imageUrls);
+  await cdb().profiles.put({ ...old, record, raws: [...(old.raws ?? []), ...raws], imageUrls: [...new Set([...old.imageUrls, ...images])] });
+  return { kind: "saved", text: `원문 보관 +${raws.length}(해석 못 한 화면: ${raws.map((r) => r.label).join(", ")}, 이미지 ${images.length}개 · 대상 확인 안 됨)`, images };
 }

@@ -10,6 +10,11 @@ export interface ProfileScreenRead {
   photoSrcs: string[] | null;
   /** 게시글 상세(스토리 아님)가 열려 있음 */
   postOpen: boolean;
+  /**
+   * 아직 해석하지 못하는 열린 레이어(예: 프로필 사진을 누르면 뜨는 사진 보기). 구조를 모르므로 보이는 그대로 원문 보관한다.
+   * label은 레이어의 화면 구조 이름(data-viewname)
+   */
+  rawLayers: { label: string; html: string; imageUrls: string[] }[];
   loginRequired: boolean;
 }
 
@@ -70,7 +75,21 @@ export function readProfileScreenInPage(): ProfileScreenRead {
     : document.querySelector("[data-viewname='DBandMemberPhotoLayoutView'] .uEmpty")
       ? []
       : null;
+  // 해석하지 못하는 열린 레이어: 알려진 것(프로필 팝업·스토리 상세)과 게시글·확장 막대는 뺀다. 바깥 레이어 하나만
+  const KNOWN = "[data-viewname='DProfileLayerView'], [data-viewname='DProfileStoryDetailView'], .cPostCard, #afterlog-collector-bar";
+  const layerSel = "section.lyWrap, div.lyWrap, [role='dialog'], [aria-modal='true'], [data-viewname$='LayerView'], [data-viewname*='Viewer']";
+  const cands = Array.from(document.querySelectorAll(layerSel)).filter((el) => visible(el) && !el.matches(KNOWN) && !el.querySelector(KNOWN) && !el.closest(KNOWN));
+  const rawLayers: ProfileScreenRead["rawLayers"] = [];
+  for (const el of cands) {
+    if (cands.some((o) => o !== el && o.contains(el))) continue;
+    if ((el.textContent ?? "").trim().length < 1 && !el.querySelector("img")) continue;
+    const before = new Set(images);
+    const html = clean(el);
+    if (html.length > 3 * 1024 * 1024) continue;
+    const label = el.getAttribute("data-viewname") || el.querySelector("[data-viewname]")?.getAttribute("data-viewname") || "레이어";
+    rawLayers.push({ label, html, imageUrls: [...images].filter((u) => !before.has(u)) });
+  }
   const postOpen = Array.from(document.querySelectorAll(".cPostCard")).some((c) => visible(c) && !c.closest("[data-viewname^='DProfileStory']"));
   const meaningful = !!(page || popups.length === 1 || document.querySelector("[data-viewname='DProfileStoryDetailView']") || photoSrcs);
-  return { pageUrl, html: meaningful ? `<div data-afterlog="screen">${parts.join("")}</div>` : null, imageUrls: [...images], photoSrcs, postOpen, loginRequired };
+  return { pageUrl, html: meaningful ? `<div data-afterlog="screen">${parts.join("")}</div>` : null, imageUrls: [...images], photoSrcs, postOpen, loginRequired, rawLayers };
 }

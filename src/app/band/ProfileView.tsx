@@ -14,6 +14,8 @@ export interface ProfileEntry {
   record: BandProfileRecord | null;
   data: SourceImport | null;
   snapshot: SourceImport | null;
+  /** 원문만 보관한 화면(해석 못 한 레이어) */
+  raws: SourceImport[];
   name: string;
 }
 
@@ -32,6 +34,7 @@ export function useProfiles(projectId: string | null, refreshKey?: unknown): Pro
       const src = await listSources(projectId);
       const datas = src.filter((s) => String(s.kind ?? "") === BAND_PROFILE_SOURCE_KIND);
       const snaps = src.filter((s) => String(s.kind ?? "") === SNAPSHOT);
+      const rawSrc = src.filter((s) => String(s.kind ?? "") === "band-profile-raw");
       const used = new Set<string>();
       const out: ProfileEntry[] = [];
       for (const d of datas) {
@@ -44,9 +47,10 @@ export function useProfiles(projectId: string | null, refreshKey?: unknown): Pro
         }
         const snap = snaps.find((s) => !used.has(s.id) && s.importedAt === d.importedAt && (s.sourceUrl === d.sourceUrl || s.fileName.replace(/_보관화면\.html$/, "") === d.fileName.replace(/\.json$/, "")));
         if (snap) used.add(snap.id);
-        out.push({ id: d.id, record, data: d, snapshot: snap ?? null, name: record?.name ?? d.fileName.replace(/^프로필_/, "").replace(/\.json$/, "") });
+        const raws = rawSrc.filter((x) => record?.rawArchives?.some((r) => r.fileName === x.fileName) && (!x.sourceUrl || !d.sourceUrl || x.sourceUrl === d.sourceUrl));
+        out.push({ id: d.id, record, data: d, snapshot: snap ?? null, raws, name: record?.name ?? d.fileName.replace(/^프로필_/, "").replace(/\.json$/, "") });
       }
-      for (const s of snaps) if (!used.has(s.id)) out.push({ id: s.id, record: null, data: null, snapshot: s, name: s.fileName.replace(/^프로필_/, "").replace(/(_보관화면)?\.html$/, "").replace(/_/g, " ") });
+      for (const s of snaps) if (!used.has(s.id)) out.push({ id: s.id, record: null, data: null, snapshot: s, raws: [], name: s.fileName.replace(/^프로필_/, "").replace(/(_보관화면)?\.html$/, "").replace(/_/g, " ") });
       if (alive) setList(out);
     })();
     return () => {
@@ -56,7 +60,7 @@ export function useProfiles(projectId: string | null, refreshKey?: unknown): Pro
   return list;
 }
 
-type Tab = "profile" | "photos" | "stories" | "memberPhotos" | "posts" | "comments" | "snapshot";
+type Tab = "profile" | "photos" | "stories" | "memberPhotos" | "posts" | "comments" | "snapshot" | "raw";
 
 export function ProfileView({
   entry,
@@ -74,6 +78,17 @@ export function ProfileView({
   const r = entry.record;
   const [tab, setTab] = useState<Tab>(r ? "profile" : "snapshot");
   const [snapHtml, setSnapHtml] = useState<string | null>(null);
+  const [rawSel, setRawSel] = useState(0);
+  const [rawHtml, setRawHtml] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setRawHtml(null);
+    const cur = entry.raws[Math.min(rawSel, entry.raws.length - 1)];
+    if (tab === "raw" && cur) void cur.blob.text().then((t) => alive && setRawHtml(t));
+    return () => {
+      alive = false;
+    };
+  }, [tab, rawSel, entry.raws]);
   useEffect(() => setTab(r ? "profile" : "snapshot"), [entry.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let alive = true;
@@ -125,6 +140,7 @@ export function ProfileView({
     ["posts", `작성글 ${mine.posts.length}`],
     ["comments", `작성댓글 ${mine.comments.length}`],
     ...(entry.snapshot ? ([["snapshot", "보관 당시 화면"]] as [Tab, string][]) : []),
+    ...(entry.raws.length ? ([["raw", `원문 보관 ${entry.raws.length}`]] as [Tab, string][]) : []),
   ];
 
   const commentTree = (c: BandProfileComment, all: BandProfileComment[]): ReactElement => {
@@ -303,6 +319,21 @@ export function ProfileView({
               ))}
             </ul>
             {!(tab === "posts" ? mine.posts : mine.comments).length ? <p className="muted">보관한 자료가 없습니다(수집 안 함).</p> : null}
+          </>
+        ) : null}
+        {tab === "raw" && entry.raws.length ? (
+          <>
+            <p className="small muted">아직 구조를 해석하지 못한 화면(예: 프로필 사진 보기)을 보이던 그대로 보관한 것입니다. 스토리·사진 수에는 넣지 않습니다.</p>
+            {entry.raws.length > 1 ? (
+              <div className="profile-main-tabs">
+                {entry.raws.map((r, i) => (
+                  <button key={r.id} type="button" className={i === rawSel ? "is-on" : ""} onClick={() => setRawSel(i)}>
+                    {r.fileName.replace(/\.html$/, "")}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {rawHtml === null ? <p className="muted">불러오는 중…</p> : <iframe className="profile-main-frame" title="원문 보관" sandbox="" srcDoc={rawHtml} />}
           </>
         ) : null}
         {tab === "snapshot" && entry.snapshot ? (

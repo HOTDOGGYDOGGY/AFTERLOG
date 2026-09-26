@@ -211,14 +211,15 @@ export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = 
   for (const f of profileFiles) files[f.name] = strToU8(f.html);
   // 목차: 구조 자료가 있는 프로필은 그 HTML을, 없으면 보관 화면을 연결한다. 프로필·스토리를 글 수에 섞지 않는다
   const profileRows = profileFiles
-    .filter((f) => f.kind === "data" || !profileFiles.some((g) => g.kind === "data" && g.p.id === f.p.id))
+    .filter((f) => f.kind === "data" || (f.kind === "snapshot" && !profileFiles.some((g) => g.kind === "data" && g.p.id === f.p.id)))
     .map((f) => {
       const r = f.p.record;
       const snap = profileFiles.find((g) => g.kind === "snapshot" && g.p.id === f.p.id && g !== f);
+      const raws = profileFiles.filter((g) => g.kind === "raw" && g.p.id === f.p.id);
       // 상세 HTML과 같은 상태 계산(명세 6.3: 목차와 상세가 어긋나지 않게)
       const stories = r ? `${storyStatus(r).text}${r.stories.items.length ? ` · 스토리 댓글 ${r.stories.items.reduce((n, x) => n + x.comments.length, 0)}개` : ""}${r.memberPhotos && r.memberPhotos.state !== "notCollected" ? ` · ${memberPhotosStatus(r).text}` : ""}` : `보관 화면만(구조 미해석)`;
       const url = r?.profileUrl ?? f.p.url;
-      return `<li><a href="${encodeURI(f.name)}">${escapeHtml(r?.name ?? f.p.name ?? "인물")} 프로필</a> · ${stories}${snap ? ` · <a href="${encodeURI(snap.name)}">보관 당시 화면</a>` : ""} · <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${r?.profileUrl ? "밴드에서 열기 ↗" : "원래 화면 열기 ↗"}</a>${r?.identity === "unconfirmed" ? " <small>(인물 연결 미확인)</small>" : ""}</li>`;
+      return `<li><a href="${encodeURI(f.name)}">${escapeHtml(r?.name ?? f.p.name ?? "인물")} 프로필</a> · ${escapeHtml(stories)}${snap ? ` · <a href="${encodeURI(snap.name)}">보관 당시 화면</a>` : ""}${raws.length ? ` · 원문 보관: ${raws.map((g) => `<a href="${encodeURI(g.name)}">${escapeHtml(g.name.replace(/\.html$/, ""))}</a>`).join(", ")}` : ""} · <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${r?.profileUrl ? "밴드에서 열기 ↗" : "원래 화면 열기 ↗"}</a>${r?.identity === "unconfirmed" ? " <small>(인물 연결 미확인)</small>" : ""}</li>`;
     });
   const t = report.totals;
   files["index.html"] = strToU8(`<!DOCTYPE html>
@@ -259,7 +260,7 @@ async function buildJobDocuments(jobId: string) {
     const sCaps: Capture[] = await db.captures.where("jobId").equals(jobId).toArray();
     const sObs: CommentObservation[] = await db.comments.where("jobId").equals(jobId).toArray();
     const sProfiles: ProfileCapture[] = await db.profiles.where("jobId").equals(jobId).toArray();
-    const urls = new Set([...sCaps.flatMap((c) => c.imageUrls), ...sProfiles.flatMap((p) => [...p.imageUrls, ...(p.record ? profileImages(p.record).map((i) => i.src) : [])])]);
+    const urls = new Set([...sCaps.flatMap((c) => c.imageUrls), ...sProfiles.flatMap((p) => [...p.imageUrls, ...(p.raws ?? []).flatMap((r) => r.imageUrls), ...(p.record ? profileImages(p.record).map((i) => i.src) : [])])]);
     const list = await db.assets.bulkGet([...urls]);
     return { job: sJob, tasks: sTasks, caps: sCaps, obs: sObs, profiles: sProfiles, assets: new Map(list.filter((x): x is StoredCollectorAsset => !!x).map((x) => [x.url, x])) };
   });
@@ -372,7 +373,7 @@ async function buildJobDocuments(jobId: string) {
 
   // 인물 프로필: 구조 자료(JSON, 앱·확장이 같은 해석기 형식) + 보관 당시 화면(혼자 열리는 HTML)
   const profiles = snap.profiles;
-  const profileFiles: { name: string; html: string; p: ProfileCapture; kind: "data" | "snapshot" }[] = [];
+  const profileFiles: { name: string; html: string; p: ProfileCapture; kind: "data" | "snapshot" | "raw" }[] = [];
   const addAsset = async (url: string): Promise<{ id: string; data: Blob; mime: string; sha256: string } | null> => {
     const a = snap.assets.get(url);
     if (!a || a.status !== "stored" || !a.blob || !a.sha256) return null;
@@ -403,6 +404,31 @@ async function buildJobDocuments(jobId: string) {
         sourceUrl: p.url,
         data: bytes,
       });
+    }
+    // 원문만 보관한 화면(해석 못 한 레이어): 스크립트 없이 혼자 열리는 HTML, 받은 이미지는 파일 안에
+    for (const raw of p.raws ?? []) {
+      let body = raw.html;
+      for (const url of raw.imageUrls) {
+        const a = snap.assets.get(url);
+        if (!a || a.status !== "stored" || !a.blob) continue;
+        const data = await blobToDataUrl(a.blob);
+        for (const form of new Set([url, url.replace(/&/g, "&amp;")])) body = body.split(form).join(data);
+      }
+      const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+      const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><title>${esc(raw.label)} 원문 보관</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:0;padding:12px}img{max-width:100%}.afterlog-note{font-size:12px;color:#666;border-bottom:1px solid #ddd;margin-bottom:8px;padding-bottom:6px}</style></head><body><p class="afterlog-note">AFTERLOG가 ${esc(new Date(raw.at).toLocaleString())}에 원문 그대로 보관한 화면입니다(구조 미해석 · ${raw.scope === "confirmed" ? "같은 화면에서 인물 확인" : "인물 확인 안 됨: 직접 열며 수집 중 연 화면"}). 화면 구조 이름: ${esc(raw.label)}</p>${body}</body></html>`;
+      const bytes = new TextEncoder().encode(html);
+      sources.push({
+        id: crypto.randomUUID(),
+        fileName: raw.fileName,
+        mime: "text/html",
+        importedAt: raw.at,
+        parserVersion: "profile-raw/1",
+        sha256: await sha256Hex(bytes),
+        kind: "band-profile-raw",
+        sourceUrl: p.record?.profileUrl ?? p.url,
+        data: bytes,
+      });
+      profileFiles.push({ name: raw.fileName, html, p, kind: "raw" });
     }
     if (!p.record) continue;
     // 이미지 참조에 확보한 파일의 해시를 적는다(원본 주소 → 파일). 못 받은 것은 해시 없이 '미확보'

@@ -157,9 +157,24 @@ export class ChromeBrowser implements CollectorBrowser {
   async captureProfile(url: string) {
     const { tabId, ms } = await this.navigate(url, "body");
     const t0 = Date.now();
-    const ex = await this.exec<Parameters<typeof captureProfileInPage>, ProfileExtraction>(tabId, captureProfileInPage, [
+    const args: Parameters<typeof captureProfileInPage> = [
       { waitMs: Math.max(1000, MIN_DELAY_MS), maxRounds: 200, maxCssBytes: 3 * 1024 * 1024, readyMs: LIMITS.pageTimeoutMs, openStories: true, storyMs: 60_000, storiesTotalMs: LIMITS.expandMs, probes: PROFILE_PROBES },
-    ]);
+    ];
+    let ex = await this.exec<Parameters<typeof captureProfileInPage>, ProfileExtraction>(tabId, captureProfileInPage, args);
+    // 실사용 진단(0.4.0): 수집 창에서는 스토리 목록이 비고 밴드의 빈 안내가 떴는데, 같은 때 사용자 탭에서는 스토리가 보였다.
+    // 다른 창에 가려진(숨김) 창에서 목록을 불러오지 않는 것으로 보고, 숨김이었고 스토리가 0개면 수집 창을 잠깐 앞으로 가져와 새로 읽은 뒤 초점을 돌려준다
+    const listed = ex.storyDetails?.listed ?? 0;
+    const winId = this.windows.body;
+    if (ex.ok && listed === 0 && ex.hiddenSeen && winId !== null) {
+      const prev = await chrome.windows.getLastFocused().catch(() => null);
+      await chrome.windows.update(winId, { focused: true, state: "normal" }).catch(() => undefined);
+      await chrome.tabs.reload(tabId).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 1500));
+      await this.waitReady(tabId);
+      const ex2 = await this.exec<Parameters<typeof captureProfileInPage>, ProfileExtraction>(tabId, captureProfileInPage, args);
+      if (prev?.id !== undefined && prev.id !== winId) await chrome.windows.update(prev.id, { focused: true }).catch(() => undefined);
+      ex = { ...ex2, rechecked: { listedBefore: listed, listedAfter: ex2.storyDetails?.listed ?? 0 } };
+    }
     return { ex, loadMs: ms + (Date.now() - t0) };
   }
 
@@ -168,26 +183,65 @@ export class ChromeBrowser implements CollectorBrowser {
    * 누른 뒤 페이지가 통째로 바뀌면 주입 스크립트가 끊기므로 탭 주소로 확인한다. 다시 누르지 않도록 재시도하지 않는다.
    */
   async resolvePopupMember(tabId: number): Promise<PopupMemberResult> {
-    const timeoutMs = 10_000;
+    // 실사용 진단(0.4.0): 팝업에 '스토리 보기'가 있었지만 같은 탭 주소가 바뀌지 않았다. 원인을 모르므로 세 경로를 모두 본다:
+    // 같은 탭 주소 변화 · 누른 탭에서 새로 열린 탭(주소를 읽고 그 탭만 닫음) · 같은 주소의 레이어 안 링크. 안 되면 '작성글 보기'로 한 번 더.
+    const timeoutMs = 8_000;
     const startUrl = (await chrome.tabs.get(tabId)).url ?? "";
-    let res: PopupMemberResult | null = null;
-    try {
-      const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: resolvePopupMemberInPage as never, args: [{ timeoutMs }] as never, world: "ISOLATED" });
-      res = (r?.result as PopupMemberResult | undefined) ?? null;
-    } catch {
-      res = null; // 페이지가 바뀌며 스크립트가 끊김: 아래에서 탭 주소로 확인
+    const attempts: NonNullable<PopupMemberResult["attempts"]> = [];
+    let name: string | null = null;
+    const isMember = (u: string | undefined) => {
+      try {
+        return !!u && /\/band\/\d+\/member\/[^/?#]+/.test(new URL(u).pathname);
+      } catch {
+        return false;
+      }
+    };
+    for (const prefer of ["story", "posts"] as const) {
+      const tabsBefore = new Set((await chrome.tabs.query({})).map((t) => t.id));
+      let res: PopupMemberResult | null = null;
+      try {
+        const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: resolvePopupMemberInPage as never, args: [{ timeoutMs, prefer }] as never, world: "ISOLATED" });
+        res = (r?.result as PopupMemberResult | undefined) ?? null;
+      } catch {
+        res = null; // 페이지가 통째로 바뀌며 스크립트가 끊김: 아래에서 탭 주소로 확인
+      }
+      name = res?.name ?? name;
+      if (res && !res.ok && (res.reason === "none" || res.reason === "multiple")) {
+        if (!attempts.length) return { ...res, attempts };
+        attempts.push({ via: prefer, outcome: "gone" });
+        break;
+      }
+      if (res && !res.ok && res.reason === "noLink") {
+        attempts.push({ via: prefer, outcome: "noLink" });
+        continue;
+      }
+      let found: { url: string; how: "sameTab" | "newTab" | "layer" } | null = res?.ok && res.memberUrl ? { url: res.memberUrl, how: res.how ?? "sameTab" } : null;
+      let newTab: number | null = null;
+      for (const t0 = Date.now(); !found && Date.now() - t0 < (res ? 1500 : timeoutMs); ) {
+        const u = (await chrome.tabs.get(tabId)).url ?? "";
+        if (u !== startUrl && isMember(u)) found = { url: u, how: "sameTab" };
+        for (const t of await chrome.tabs.query({}))
+          if (!found && t.id !== undefined && !tabsBefore.has(t.id) && (t.openerTabId === tabId || isMember(t.url ?? t.pendingUrl))) {
+            const tu = t.url || t.pendingUrl || "";
+            if (isMember(tu)) {
+              found = { url: tu, how: "newTab" };
+              newTab = t.id;
+            }
+          }
+        if (!found) await new Promise((r) => setTimeout(r, 200));
+      }
+      // 사용자 화면을 되돌린다: 같은 탭이 바뀌었으면 뒤로, 우리가 누른 링크로 새 탭이 열렸으면 그 탭만 닫는다
+      if ((await chrome.tabs.get(tabId)).url !== startUrl) await chrome.tabs.goBack(tabId).catch(() => undefined);
+      if (newTab !== null) await chrome.tabs.remove(newTab).catch(() => undefined);
+      if (found) {
+        attempts.push({ via: prefer, outcome: found.how });
+        return { ok: true, memberUrl: found.url, via: prefer, name, startUrl, how: found.how, attempts };
+      }
+      attempts.push({ via: prefer, outcome: "noChange" });
+      // 되돌린 뒤 팝업이 다시 열려 있어야 '작성글 보기'를 누를 수 있다(없으면 위에서 gone)
+      await new Promise((r) => setTimeout(r, 600));
     }
-    if (res && !res.ok && res.reason !== "noChange") return res;
-    let memberUrl = res?.memberUrl ?? null;
-    for (const t0 = Date.now(); !memberUrl && Date.now() - t0 < timeoutMs; ) {
-      await new Promise((r) => setTimeout(r, 200));
-      const u = (await chrome.tabs.get(tabId)).url ?? "";
-      if (u !== startUrl && /\/member\/[^/?#]+/.test(new URL(u).pathname)) memberUrl = u;
-    }
-    // 사용자가 보던 화면으로 되돌린다
-    if ((await chrome.tabs.get(tabId)).url !== startUrl) await chrome.tabs.goBack(tabId).catch(() => undefined);
-    if (!memberUrl) return { ok: false, reason: "noChange", memberUrl: null, via: res?.via ?? null, name: res?.name ?? null, startUrl };
-    return { ok: true, memberUrl, via: res?.via ?? null, name: res?.name ?? null, startUrl };
+    return { ok: false, reason: attempts.some((a) => a.outcome === "noChange") ? "noChange" : "noLink", memberUrl: null, via: null, name, startUrl, attempts };
   }
 
   async readMemberPhotos(url: string) {

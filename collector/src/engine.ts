@@ -4,6 +4,7 @@
 import { imageRefFromSrc, parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
 import { bandProfileUrl, memberPhotosStatus, mergeProfileRecords, photoHistoryStatus, storyStatus, parseBandProfileDocument, profileImages, type BandProfileRecord } from "../../src/importers/band/profile";
 import type { ProfileExtraction } from "./page/profile";
+import type { PopupMemberResult } from "./page/popupMember";
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type SelectReason, type Selection, type Task } from "./db";
 import { parseKoreanDateTime } from "../../src/importers/band/time";
@@ -773,13 +774,20 @@ export class Engine {
       popupImages = ex.imageUrls;
       pageUrl = ex.pageUrl;
       // 2) 인물 주소 알아내기: 인물 화면 위 팝업이라 이미 확인됐으면 누르지 않는다. 아니면 '스토리 보기' 또는 '작성글 보기'만 누름
-      const res = popup.identity === "confirmed" && popup.bandNo && popup.memberKey
-        ? { ok: true, memberUrl: `${new URL(ex.pageUrl).origin}/band/${popup.bandNo}/member/${encodeURIComponent(popup.memberKey)}/profile`, via: null, reason: undefined }
+      const res: PopupMemberResult | null = popup.identity === "confirmed" && popup.bandNo && popup.memberKey
+        ? { ok: true, name: popup.name, startUrl: ex.pageUrl, memberUrl: `${new URL(ex.pageUrl).origin}/band/${popup.bandNo}/member/${encodeURIComponent(popup.memberKey)}/profile`, via: null, reason: undefined }
         : br.resolvePopupMember
           ? await br.resolvePopupMember(task.tabId)
           : null;
       const m = res?.ok ? parseMemberUrl(res.memberUrl!) : null;
-      await diag.event(task.id, { stage: "profile", state: m ? "ok" : "partial", ...(m ? {} : { code: "selectorMissing" as const }) });
+      // 어떤 경로로 알아냈는지·못 알아냈는지(진단: 주소·이름 없이 코드만)
+      for (const a of res?.attempts ?? [])
+        await diag.event(task.id, {
+          stage: "profile",
+          state: a.outcome === "noChange" || a.outcome === "noLink" || a.outcome === "gone" ? "partial" : "ok",
+          code: ({ sameTab: "popupSameTab", newTab: "popupNewTab", layer: "popupLayer", noChange: "popupNoChange", noLink: "popupNoLink", gone: "popupNoChange" } as const)[a.outcome],
+        });
+      if (!res?.attempts?.length) await diag.event(task.id, { stage: "profile", state: m ? "ok" : "partial", ...(m ? {} : { code: "selectorMissing" as const }) });
       if (m) {
         pageUrl = `${m.origin}/band/${m.bandNo}/member/${m.memberKey}/profile`;
         via = res?.via ?? null;
@@ -801,6 +809,8 @@ export class Engine {
       const { ex, loadMs } = await br.captureProfile(pageUrl);
       await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", wait: durationBucket(loadMs), page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
       if (!ex.ok && ex.reason === "login") return loginStop;
+      if (ex.hiddenSeen) await diag.event(task.id, { stage: "profile", state: "partial", code: "pageHidden" });
+      if (ex.rechecked) await diag.event(task.id, { stage: "profile", state: ex.rechecked.listedAfter > 0 ? "ok" : "partial", code: "recheckVisible", count: countBucket(ex.rechecked.listedAfter) });
       const probes: Partial<Record<ProbeId, CountBucket>> = {};
       for (const [k, v] of Object.entries(ex.probeCounts ?? {})) probes[k as ProbeId] = countBucket(v);
       if (Object.keys(probes).length) await diag.event(task.id, { stage: "probes", state: ex.ok ? "ok" : "fail", probes });

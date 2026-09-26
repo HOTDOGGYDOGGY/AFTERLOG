@@ -14,7 +14,7 @@ import { applyFollowScreen, inScope } from "../../collector/src/follow";
 import type { ProfileScreenRead } from "../../collector/src/page/profileScreen";
 
 const load = (n: string) => readFileSync(FIXTURE_DIR + "profile/" + n, "utf8");
-const screen = (html: string | null, pageUrl: string, over: Partial<ProfileScreenRead> = {}): ProfileScreenRead => ({ pageUrl, html, imageUrls: [], photoSrcs: null, postOpen: false, loginRequired: false, ...over });
+const screen = (html: string | null, pageUrl: string, over: Partial<ProfileScreenRead> = {}): ProfileScreenRead => ({ pageUrl, html, imageUrls: [], photoSrcs: null, postOpen: false, loginRequired: false, rawLayers: [], ...over });
 const LIST = "https://www.band.us/band/100200300/member";
 const PROFILE = "https://www.band.us/band/100200300/member/AbCdEf%3D%3D%3D/profile";
 
@@ -67,5 +67,24 @@ describe("직접 열며 수집", () => {
     expect((await applyFollowScreen(jobId, taskId, screen(null, LIST, { postOpen: true }), "t")).kind).toBe("post");
     expect((await applyFollowScreen(jobId, taskId, screen(null, LIST, { loginRequired: true }), "t")).kind).toBe("login");
     expect(await cdb().profiles.count()).toBe(0);
+  });
+
+  it("해석 못 한 레이어(예: 프로필 사진 보기)는 원문 보관: 인물 화면과 함께면 확인됨, 레이어만이면 '확인 안 됨', 인물이 없으면 저장 안 함", async () => {
+    const { jobId, taskId } = await job();
+    const viewer = { label: "DPhotoViewerLayerView", html: '<div class="lyWrap"><img src="https://x.pstatic.net/a.jpg"><p>사진</p></div>', imageUrls: ["https://x.pstatic.net/a.jpg"] };
+    expect((await applyFollowScreen(jobId, taskId, screen(null, LIST, { rawLayers: [viewer] }), "t0")).kind).toBe("notProfile");
+    const withPopup = await applyFollowScreen(jobId, taskId, screen(load("member-popup.html"), LIST, { rawLayers: [viewer] }), "t1");
+    expect(withPopup.text).toContain("원문 보관 +1");
+    expect(withPopup.images).toContain("https://x.pstatic.net/a.jpg");
+    const again = await applyFollowScreen(jobId, taskId, screen(null, LIST, { rawLayers: [viewer] }), "t2");
+    expect(again.kind).toBe("same");
+    const other = { ...viewer, html: viewer.html.replace("사진", "다른 사진") };
+    const alone = await applyFollowScreen(jobId, taskId, screen(null, LIST, { rawLayers: [other] }), "t3");
+    expect(alone.text).toContain("대상 확인 안 됨");
+    const cap = (await cdb().profiles.where("taskId").equals(taskId).first())!;
+    expect(cap.raws?.map((r) => r.scope)).toEqual(["confirmed", "unverified"]);
+    expect(cap.record!.rawArchives).toHaveLength(2);
+    // 스토리·사진 수에는 넣지 않는다
+    expect(cap.record!.stories.items).toHaveLength(0);
   });
 });
