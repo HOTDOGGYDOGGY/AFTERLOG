@@ -3,6 +3,8 @@ import type { PostExtraction } from "./page/extractPost";
 import type { DiscoverRound } from "./page/discoverLinks";
 import type { MemberCommentsRound, OpenCommentPostResult } from "./page/memberComments";
 import type { ProfilePopupExtraction } from "./page/profilePopup";
+import type { PopupMemberResult } from "./page/popupMember";
+import type { MemberPhotosRead } from "./page/memberPhotos";
 import type { ProfileExtraction } from "./page/profile";
 
 /** 수집 탭의 역할: 목록·댓글 목록 탐색 / 글 열기 */
@@ -39,8 +41,12 @@ export interface CollectorBrowser {
   captureProfile?(url: string): Promise<{ ex: ProfileExtraction; loadMs: number }>;
   /** 사용자 탭에 열린 프로필 팝업(주소 변화 없음)을 읽는다. 누르지 않는다 */
   captureProfilePopup?(tabId: number): Promise<ProfilePopupExtraction>;
+  /** 팝업의 '스토리 보기'(없으면 '작성글 보기')만 눌러 인물 주소를 알아내고 사용자 화면을 되돌린다 */
+  resolvePopupMember?(tabId: number): Promise<PopupMemberResult>;
+  /** 인물 화면 '사진' 탭의 사진 주소(누르지 않음) */
+  readMemberPhotos?(url: string): Promise<MemberPhotosRead>;
   /** 실패한 화면의 구조 표본(진단용) */
-  sampleStructure(target: { url?: string; tabId?: number }): Promise<unknown>;
+  sampleStructure(target: { url?: string; tabId?: number }, scope?: "postCard" | "profile"): Promise<unknown>;
   fetchAsset(url: string): Promise<FetchedAsset>;
   dispose(): Promise<void>;
 }

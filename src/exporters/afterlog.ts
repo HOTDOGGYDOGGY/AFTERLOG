@@ -13,7 +13,7 @@ import { bandMemberKey, isBandProfileRecord, mergeProfileRecords, type BandProfi
 import { sha256Hex } from "../storage/hash";
 
 export { ProjectFileError };
-export const APP_VERSION = "0.4.0";
+export const APP_VERSION = "0.4.1";
 
 /**
  * includeSources=false: 공유용 사본. 원본 HTML/텍스트(로그인 정보·주변 화면이 섞일 수 있음)를 빼고

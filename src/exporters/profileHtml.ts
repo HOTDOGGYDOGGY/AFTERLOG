@@ -49,6 +49,22 @@ export function renderProfileHtml(
 <p class="counts">이 스토리의 표정 ${shownText(s.reactionsShown)} · 댓글 ${shownText(s.commentsShown)}${state ? ` · <span class="${s.commentsState === "none" ? "muted" : "warn"}">${state}</span>` : ""}</p>
 ${s.comments.length ? `<details open><summary>댓글 ${s.comments.length}개</summary><ul class="comments">${top.map((c) => comment(c, s.comments)).join("")}</ul></details>` : ""}</article>`;
   };
+  // 작성 사진: 원본을 받았으면 원본, 아니면 받은 축소본, 둘 다 없으면 온라인 링크
+  const memberPhotosHtml = () => {
+    const mp = r.memberPhotos;
+    if (!mp) return `<p class="muted">작성 사진 수집 안 함</p>`;
+    if (mp.state === "none") return `<p class="muted">작성 사진 0장 확인</p>`;
+    if (mp.state === "unrecognized") return `<p class="muted">작성 사진 확인 못 함(구조 미인식 또는 표시되지 않음)</p>`;
+    if (mp.state === "notCollected") return `<p class="muted">작성 사진 수집 안 함</p>`;
+    return `<div class="grid">${mp.items
+      .map((p) => {
+        const full = imageUrl(p.image);
+        const small = p.thumb ? imageUrl(p.thumb) : null;
+        const u = full ?? small;
+        return u ? `<a href="${esc(u)}" target="_blank"><img class="g-img" src="${esc(u)}" alt="">${!full && small ? '<small class="muted">축소본</small>' : ""}</a>` : pic(p.image, "g-img");
+      })
+      .join("")}</div>`;
+  };
   const dark = opts.theme === "dark";
   const title = `${r.name ?? "인물"} 프로필`;
   const storyState = STORY_STATE_TEXT[r.stories.state];
@@ -73,12 +89,12 @@ section{margin:18px 0}h2{font-size:17px;margin:0 0 8px}
 .s-body{white-space:normal;margin:6px 0}.s-img,.c-img{max-width:100%;border-radius:8px;display:block;margin:6px 0}.counts{font-size:13px;color:var(--muted);margin:6px 0}
 .comments,.replies{list-style:none;padding-left:0;margin:6px 0}.replies{padding-left:22px;border-left:2px solid var(--line)}.c{margin:8px 0}.c-head{font-size:13px}.c-head time{color:var(--muted)}
 .c-face{width:22px;height:22px;border-radius:50%;vertical-align:middle;margin-right:6px}.c-body{margin-left:28px}
-.online,.missing{font-size:12px;color:var(--muted)}dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}dt{color:var(--muted)}dd{margin:0}
+.online,.missing{font-size:12px;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}.grid a{display:block;position:relative}.g-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block}dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0}dt{color:var(--muted)}dd{margin:0}
 </style></head><body><main>
 <p class="note">AFTERLOG가 ${esc(r.observedAt ? new Date(r.observedAt).toLocaleString() : "")} 보관한 프로필입니다(보관 시점 기준).${r.profileUrl ? ` 원본: <a href="${esc(r.profileUrl)}" target="_blank" rel="noreferrer">밴드에서 열기 ↗</a>` : r.sourceUrl ? ` 들어온 화면: <a href="${esc(r.sourceUrl)}" target="_blank" rel="noreferrer">원래 화면 열기 ↗</a>(팝업은 인물을 다시 골라야 할 수 있음)` : ""}${r.identity === "unconfirmed" ? " · <span class=\"warn\">원본 인물 연결 미확인</span>" : ""}${opts.snapshotHref ? ` · <a href="${esc(opts.snapshotHref)}">보관 당시 화면</a>` : ""}</p>
 ${r.cover ? `<div class="cover">${pic(r.cover, "cover-img")}</div>` : ""}
 <div class="head"${r.cover ? "" : ' style="margin-top:16px"'}>${pic(r.avatar, "face", "프로필 사진")}<div class="who"><h1>${esc(r.name ?? "이름 확인 못 함")}</h1>${r.description ? `<div>${esc(r.description)}</div>` : ""}</div></div>
-<nav><a href="#profile">프로필</a><a href="#photos">사진 이력</a><a href="#stories">스토리 ${r.stories.items.length}</a></nav>
+<nav><a href="#profile">프로필</a><a href="#photos">사진 이력</a><a href="#member-photos">작성 사진</a><a href="#stories">스토리 ${r.stories.items.length}</a></nav>
 <section id="profile"><h2>프로필</h2><dl>
 ${r.info ? `<dt>추가 소개</dt><dd>${esc(r.info)}</dd>` : ""}${r.joinInfo ? `<dt>가입</dt><dd>${esc(r.joinInfo)}</dd>` : ""}
 <dt>프로필 표정</dt><dd>${shownText(r.reactionsShown)}</dd><dt>프로필 댓글</dt><dd>${shownText(r.commentsShown)}</dd>
@@ -86,6 +102,7 @@ ${r.storyCountShown !== null ? `<dt>표시된 스토리 수</dt><dd>${r.storyCou
 </dl>${r.history?.length ? `<details><summary>앞선 관측 ${r.history.length}개</summary><ul>${r.history.map((h) => `<li>${esc(h.observedAt ? new Date(h.observedAt).toLocaleString() : "")}: ${esc(h.name ?? "")}${h.description ? ` · ${esc(h.description)}` : ""} · 표정 ${shownText(h.reactionsShown)}</li>`).join("")}</ul></details>` : ""}
 ${r.notes.length ? `<ul class="muted">${r.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}</section>
 <section id="photos"><h2>사진 이력</h2>${photoState ? `<p class="muted">${photoState}</p>` : r.photoHistory.items.map((p) => `<figure>${pic(p.image, "s-img")}<figcaption>${esc(p.timeText ?? "")}</figcaption></figure>`).join("")}</section>
+<section id="member-photos"><h2>작성 사진${r.memberPhotos?.items.length ? ` ${r.memberPhotos.items.length}` : ""}</h2>${memberPhotosHtml()}</section>
 <section id="stories"><h2>스토리</h2>${storyState ? `<p class="muted">${storyState}${r.storyCountShown ? `(표시 ${r.storyCountShown}개)` : ""}</p>` : ""}${r.stories.items.map(story).join("\n")}</section>
 </main></body></html>
 `;

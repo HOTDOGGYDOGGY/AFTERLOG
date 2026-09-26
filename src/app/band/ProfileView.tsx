@@ -55,7 +55,7 @@ export function useProfiles(projectId: string | null, refreshKey?: unknown): Pro
   return list;
 }
 
-type Tab = "profile" | "photos" | "stories" | "posts" | "comments" | "snapshot";
+type Tab = "profile" | "photos" | "stories" | "memberPhotos" | "posts" | "comments" | "snapshot";
 
 export function ProfileView({
   entry,
@@ -118,6 +118,7 @@ export function ProfileView({
           ["profile", "프로필"],
           ["photos", "사진 이력"],
           ["stories", `스토리 ${r.stories.items.length}`],
+          ["memberPhotos", `작성 사진${r.memberPhotos?.items.length ? ` ${r.memberPhotos.items.length}` : ""}`],
         ] as [Tab, string][])
       : []),
     ["posts", `작성글 ${mine.posts.length}`],
@@ -261,6 +262,36 @@ export function ProfileView({
               );
             })}
           </>
+        ) : null}
+        {tab === "memberPhotos" && r ? (
+          !r.memberPhotos || r.memberPhotos.state === "notCollected" ? (
+            <p className="muted">작성 사진 수집 안 함</p>
+          ) : r.memberPhotos.state === "none" ? (
+            <p className="muted">작성 사진 0장 확인</p>
+          ) : r.memberPhotos.state === "unrecognized" ? (
+            <p className="muted">작성 사진 확인 못 함(구조 미인식 또는 표시되지 않음)</p>
+          ) : (
+            <>
+              <p className="small muted">이 인물 화면의 '사진' 탭에 있던 사진입니다(원본을 받지 못한 것은 축소본).</p>
+              <div className="pv-grid">
+                {r.memberPhotos.items.map((p, i) => {
+                  const full = p.image.sha256 ? assetIdBySha(p.image.sha256) : undefined;
+                  const small = p.thumb?.sha256 ? assetIdBySha(p.thumb.sha256) : undefined;
+                  const u = full ? assetUrl(full) : small ? assetUrl(small) : undefined;
+                  return u ? (
+                    <a key={i} href={u} target="_blank" rel="noreferrer" className="pv-grid-item">
+                      <img src={u} alt="" />
+                      {!full ? <small>축소본</small> : null}
+                    </a>
+                  ) : (
+                    <span key={i} className="pv-grid-item">
+                      {img(p.image, "pv-img")}
+                    </span>
+                  );
+                })}
+              </div>
+            </>
+          )
         ) : null}
         {tab === "posts" || tab === "comments" ? (
           <>

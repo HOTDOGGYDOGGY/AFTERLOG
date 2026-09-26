@@ -3,7 +3,7 @@
 
 // 2: 개수 구간에 unknown 추가(C05), scopeMissing 오류 코드 추가(C04)
 // 3: 접힌 댓글 펼치기 단계(expand)와 remaining·candidates 구간 추가
-export const DIAG_SCHEMA_VERSION = 4;
+export const DIAG_SCHEMA_VERSION = 5;
 export const ADAPTER_VERSION = "band-web-1";
 export const PROBE_SUITE_VERSION = "band-post-1";
 
@@ -96,6 +96,20 @@ export const PROBE_IDS = [
   "mention",
   "loading",
   "attachmentImage",
+  "profileView",
+  "profileName",
+  "profileAvatar",
+  "profileCover",
+  "profileReaction",
+  "storyList",
+  "storyItem",
+  "storyDetailLink",
+  "storyDetail",
+  "storyDetailText",
+  "storyCommentList",
+  "profilePopup",
+  "storyAnchor",
+  "postsLink",
 ] as const;
 /** unknown = 확인하지 못함(실제 0과 다르다) */
 export const COUNT_BUCKETS = ["unknown", "0", "1", "2to5", "6to20", "21to100", "gt100"] as const;

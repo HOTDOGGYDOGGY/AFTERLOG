@@ -4,7 +4,7 @@
 // 대상 범위(글 카드)를 못 찾으면 main/body로 넓히지 않고 scopeMissing으로 끝낸다(C04).
 
 export function sampleStructureInPage(args: {
-  scope: "postCard";
+  scope: "postCard" | "profile";
   probes: [string, string][];
   tags: string[];
   roles: string[];
@@ -23,8 +23,23 @@ export function sampleStructureInPage(args: {
     }
     return bodyHit;
   };
-  let cards = Array.from(document.querySelectorAll(".cPostCard"));
-  if (!cards.length)
+  // 프로필 화면: 열린 스토리 상세 → 프로필 본문 → 팝업 순. 없으면 넓히지 않는다
+  let profileRoot: Element | null = null;
+  if (args.scope === "profile") {
+    const vis = (el: Element) => {
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const st = n.ownerDocument?.defaultView?.getComputedStyle(n);
+        if (st && (st.display === "none" || st.visibility === "hidden")) return false;
+      }
+      return true;
+    };
+    const pick = (sel: string) => Array.from(document.querySelectorAll(sel)).filter(vis);
+    const cand = [pick("[data-viewname='DProfileStoryDetailView']"), pick("[data-viewname='DProfileMainLayoutView'], [data-viewname='DProfileView']"), pick("[data-viewname='DProfileLayerView']")].find((x) => x.length);
+    if (!cand) return { scopeMissing: true as const };
+    profileRoot = cand[0];
+  }
+  let cards = profileRoot ? [profileRoot] : Array.from(document.querySelectorAll(".cPostCard"));
+  if (!cards.length && !profileRoot)
     cards = Array.from(document.querySelectorAll(".postWriterInfoWrap"))
       .map(scopeFromWriter)
       .filter((c, i, a): c is Element => !!c && a.indexOf(c) === i);

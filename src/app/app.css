@@ -2557,3 +2557,29 @@ hr {
 .pv-list li {
   margin: 6px 0;
 }
+.pv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+}
+.pv-grid-item {
+  position: relative;
+  display: block;
+}
+.pv-grid-item img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+.pv-grid-item small {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  background: #0009;
+  color: #fff;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+}

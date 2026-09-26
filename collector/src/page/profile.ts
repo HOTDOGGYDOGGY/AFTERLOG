@@ -29,6 +29,8 @@ export interface ProfileExtraction {
   structureHtml?: string | null;
   /** 스토리 상세: 연 수 · 목록 항목 수 · 확인 실패(다른 스토리가 열림 등) · 닫지 못함 */
   storyDetails?: { opened: number; listed: number; mismatched: number; notClosed: number; commentClicks: number; stoppedEarly: boolean };
+  /** 진단용: 확인 위치별 개수(스크롤 후, 상세를 열기 전 화면) */
+  probeCounts?: Record<string, number>;
 }
 
 export async function captureProfileInPage(opts: {
@@ -41,6 +43,8 @@ export async function captureProfileInPage(opts: {
   /** 스토리 하나에 쓸 시간 · 전체 스토리 상세 시간 */
   storyMs?: number;
   storiesTotalMs?: number;
+  /** 진단용 확인 위치(개수만 돌려준다) */
+  probes?: [string, string][];
 }): Promise<ProfileExtraction> {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const txt = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -50,6 +54,20 @@ export async function captureProfileInPage(opts: {
   const pickRoot = () => document.querySelector("main#content, #content, [role='main'], .midContent, main") ?? document.body;
   // 처음 그려질 때까지
   for (const t0 = Date.now(); Date.now() - t0 < opts.readyMs && txt(pickRoot()).length < 5; ) await sleep(200);
+
+  // 스토리 목록이 채워지거나 밴드가 '스토리가 없다'고 표시할 때까지 기다린다(실사용: 목록보다 카드가 먼저 그려짐).
+  // 빈 안내가 먼저 떴다가 목록이 오는 경우를 위해 빈 안내면 조금 더 본다
+  const storyState = () => {
+    const l = document.querySelector("[data-viewname='DProfileStoryListView']");
+    if (!l) return "none";
+    if (l.querySelector("[data-viewname='DProfileStoryListItemView']")) return "items";
+    return l.querySelector(".uEmpty") ? "empty" : "loading";
+  };
+  for (const t0 = Date.now(); Date.now() - t0 < opts.readyMs && (storyState() === "loading" || storyState() === "none"); ) {
+    await sleep(250);
+    if (storyState() === "none" && Date.now() - t0 > 4000) break;
+  }
+  if (storyState() === "empty") for (let i = 0; i < 10 && storyState() === "empty"; i++) await sleep(300);
 
   // 끝까지 스크롤(스토리 더 불러오기). 높이가 3번 연속 그대로면 끝
   let rounds = 0;
@@ -66,6 +84,15 @@ export async function captureProfileInPage(opts: {
     rounds++;
   }
   window.scrollTo(0, 0);
+
+  const probeCounts: Record<string, number> = {};
+  for (const [id, sel] of opts.probes ?? []) {
+    try {
+      probeCounts[id] = document.querySelectorAll(sel).length;
+    } catch {
+      probeCounts[id] = 0;
+    }
+  }
 
   // ---- 스토리 상세(읽기 전용 열기 → 댓글 펼치기 → 복제 → 닫기) ----
   const cleanClone = (el: Element) => {
@@ -193,7 +220,7 @@ export async function captureProfileInPage(opts: {
     : null;
 
   const root = pickRoot();
-  if (txt(root).length < 2) return { ...base, ok: false, reason: "empty", scrollRounds: rounds, structureHtml, storyDetails: sd };
+  if (txt(root).length < 2) return { ...base, ok: false, reason: "empty", scrollRounds: rounds, structureHtml, storyDetails: sd, probeCounts };
 
   // ---- 복제·정리 ----
   const abs = (u: string) => {
@@ -328,5 +355,6 @@ export async function captureProfileInPage(opts: {
     scrollRounds: rounds,
     structureHtml,
     storyDetails: sd,
+    probeCounts,
   };
 }

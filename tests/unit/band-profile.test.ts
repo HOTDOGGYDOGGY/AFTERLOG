@@ -124,3 +124,27 @@ describe("프로필 HTML(스크립트 없음·이스케이프·미확보 표시)
     expect(html).toContain("프로필 표정</dt><dd>확인 못 함");
   });
 });
+
+describe("인물 화면(작성글·사진 탭) 저장 페이지", () => {
+  it("인물 화면 위 팝업: 이름이 머리글과 같으면 주소의 인물로 확인(누르지 않음). 스토리 칸이 비면 0개로 단정하지 않음", () => {
+    const [r] = parse(load("member-page-popup.html"));
+    expect(r).toMatchObject({ surface: "profilePopup", identity: "confirmed", bandNo: "100200300", memberKey: "ZzYyXx======", name: "가상리더" });
+    expect(r.stories.state).toBe("unrecognized");
+    // 이름이 다르면(다른 사람의 팝업) 연결하지 않는다
+    const [other] = parse(load("member-page-popup.html").replace('<strong class="userName">가상리더</strong>', '<strong class="userName">다른사람</strong>'));
+    expect(other).toMatchObject({ identity: "unconfirmed", memberKey: null });
+  });
+  it("'사진' 탭: 사진 목록을 원본 주소로(목록은 축소본), 같은 인물 프로필에 합친다", () => {
+    const [ph] = parse(load("member-photos.html"));
+    expect(ph).toMatchObject({ surface: "memberPage", memberKey: "ZzYyXx======", name: "가상리더" });
+    expect(ph.memberPhotos?.items.map((x) => [x.image.src, x.thumb?.src ?? null])).toEqual([
+      ["https://coresos-phinf.pstatic.net/a/abc/p_one.jpg", "https://coresos-phinf.pstatic.net/a/abc/p_one.jpg?type=s150"],
+      ["./photo_files/p_two.jpg", null],
+    ]);
+    const [pop] = parse(load("member-page-popup.html"));
+    const m = mergeProfileRecords(pop, ph);
+    expect(m.record).toMatchObject({ surface: "profilePopup", description: "가상 소개" });
+    expect(m.record.memberPhotos?.items).toHaveLength(2);
+    expect(mergeProfileRecords(m.record, ph).changed).toBe(false);
+  });
+});

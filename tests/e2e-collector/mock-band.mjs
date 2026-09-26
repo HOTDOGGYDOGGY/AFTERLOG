@@ -86,21 +86,25 @@ const band = http.createServer((req, res) => {
   }
   // 멤버 목록: 이름을 누르면 주소 변화 없이 프로필 팝업(실제 저장 표본 구조, 링크는 모두 '#')
   if (url.pathname === `/band/${BAND}/member`) {
-    const people = [["나래", "avatar_narae.png", 0], ["다온", "avatar_garam.png", 2]];
+    // 실제처럼 링크는 모두 '…/member#'. 다온: '스토리 보기'를 누르면 프로필 화면으로 페이지 이동 · 나래(스토리 0): '스토리 보기'가 없고 '작성글 보기'가 주소만 바꿈
+    const people = [["나래", "avatar_narae.png", 0, "MKNARAE"], ["다온", "avatar_garam.png", 2, "MKDAON"]];
     const popup = (i) => `<div data-viewname="DProfileLayoutView" class="lyWrap layer_wrap" style="position:fixed;inset:0;background:#0008"><div class="lyContent -layerProfileCardStyle" style="background:#fff;width:355px;margin:60px auto;padding:16px"><div data-viewname="DProfileLayerView" class="_dProfileView">
       <div class="layerOptionBox"><div class="joinInfoBox"><p class="joinInfo">2020년 3월 1일 가입</p></div><button type="button" class="closeButton _btnClose">닫기</button></div>
-      <div class="cProfileViewCard"><div class="infoBox"><a href="/band/${BAND}/member#" class="imgBox _imgAnchor"><img class="profileImage _profileImage" src="http://127.0.0.1:4589/img/${people[i][1]}" width="80"></a><strong class="userName">${people[i][0]}</strong>
-        <div data-viewname="DProfileDescriptionView"><span class="userNickname _userDesc">팝업 소개 ${i + 1}</span><div class="optionInfo _userInfo"></div></div></div>
-        <div class="sideBox"><button type="button" class="like _likeEmotionRegion trap"><div class="_emotionCount"></div></button><a href="/band/${BAND}/member#" class="comment _commentBtn"><div class="_commentCountRegion"></div></a></div></div>
-      <div data-viewname="DProfileStoryCountView"><a class="profileStoryMoveButton _storyAnchor trap" href="/band/${BAND}/member#"><span class="title">스토리 보기</span><span class="subText">전체글 <em class="count">${people[i][2]}</em></span></a></div></div>
+      <div class="cProfileViewCard"><div class="infoBox"><a href="/band/${BAND}/member#" class="imgBox _imgAnchor trap"><img class="profileImage _profileImage" src="http://127.0.0.1:4589/img/${people[i][1]}" width="80"></a><strong class="userName">${people[i][0]}</strong>
+        <div data-viewname="DProfileDescriptionView"><span class="userNickname _userDesc">팝업 소개 ${i + 1}</span><div class="optionInfo _userInfo"></div></div>
+        <div data-viewname="DProfileNavView" class="footerNav"><a href="/band/${BAND}/member#" class="chatting _btnSendMessage trap">채팅하기</a><a href="/band/${BAND}/member#" class="writePost _btnGotoSearchMemberContent" data-key="${people[i][3]}">작성글 보기</a></div></div>
+        <div class="sideBox"><button type="button" class="like _likeEmotionRegion trap"><div class="_emotionCount"></div></button><a href="/band/${BAND}/member#" class="comment _commentBtn trap"><div class="_commentCountRegion"></div></a></div></div>
+      ${people[i][2] ? `<div data-viewname="DProfileStoryCountView"><a class="profileStoryMoveButton _storyAnchor" href="/band/${BAND}/member#" data-key="${people[i][3]}"><span class="title">스토리 보기</span><span class="subText">전체글 <em class="count">${people[i][2]}</em></span></a></div>` : ""}</div>
       <button type="button" class="btnNext _nextProfileBtn trap">다음 프로필</button></div></div>`;
-    const script = `window.__traps=0;document.addEventListener('click',e=>{if(e.target.closest('.trap'))window.__traps++},true);
+    const script = `const bump=()=>sessionStorage.setItem('traps',String(+(sessionStorage.getItem('traps')||0)+1));window.__traps=()=>+(sessionStorage.getItem('traps')||0);
+      document.addEventListener('click',e=>{if(e.target.closest('.trap'))bump();const s=e.target.closest('a._storyAnchor');if(s){e.preventDefault();location.href='/band/${BAND}/member/'+s.dataset.key+'/profile'}const w=e.target.closest('a._btnGotoSearchMemberContent');if(w){e.preventDefault();history.pushState(null,'','/band/${BAND}/member/'+w.dataset.key+'/post');document.querySelectorAll('[data-viewname=DProfileLayoutView]').forEach(x=>x.remove())}},true);
+      window.addEventListener('popstate',()=>{});
       const P=${JSON.stringify([popup(0), popup(1)])};
       document.querySelectorAll('.memberItem').forEach((b,i)=>b.addEventListener('click',()=>{document.querySelectorAll('[data-viewname=DProfileLayoutView]').forEach(x=>x.remove());document.body.insertAdjacentHTML('beforeend',P[i]);document.querySelector('[data-viewname=DProfileLayoutView] ._btnClose').addEventListener('click',()=>document.querySelector('[data-viewname=DProfileLayoutView]').remove())}));`;
     return send(200, page(`<ul class="memberList">${people.map((p) => `<li><button type="button" class="memberItem">${p[0]}</button></li>`).join("")}</ul>`, script));
   }
   // 인물(멤버) 화면: 프로필 · 작성글 목록 · 작성댓글 목록(실제 저장 샘플과 같은 구조)
-  m = url.pathname.match(new RegExp(`^/band/${BAND}/member/(MK[A-Z]+)(?:/(post|comment|profile))?$`));
+  m = url.pathname.match(new RegExp(`^/band/${BAND}/member/(MK[A-Z]+)(?:/(post|comment|profile|photo))?$`));
   if (m) {
     const key = m[1];
     const tab = m[2] ?? "post";
@@ -125,7 +129,8 @@ const band = http.createServer((req, res) => {
       const script = `window.__traps=0;document.addEventListener('click',e=>{if(e.target.closest('.trap,._likeEmotionRegion,._emoteMainBtn,._sendMessageButton,textarea'))window.__traps++},true);
         const FULL=${JSON.stringify(FULL)},D=${JSON.stringify(D)},C=${JSON.stringify(C)},R=${JSON.stringify(R)};
         const comment=${comment.toString()};
-        let more=true;window.addEventListener('scroll',()=>{if(more&&innerHeight+scrollY>=document.body.scrollHeight-50){more=false;setTimeout(()=>{document.querySelector('.storyList').insertAdjacentHTML('beforeend',document.getElementById('more').innerHTML)},300)}});
+        setTimeout(()=>{document.querySelector('.storyList').innerHTML=document.getElementById('first').innerHTML},1500);
+        let more=true;window.addEventListener('scroll',()=>{if(more&&document.querySelector('.storyList').children.length&&innerHeight+scrollY>=document.body.scrollHeight-50){more=false;setTimeout(()=>{document.querySelector('.storyList').insertAdjacentHTML('beforeend',document.getElementById('more').innerHTML)},300)}});
         document.addEventListener('click',e=>{const a=e.target.closest('a._storyDetail');if(!a)return;e.preventDefault();const i=+a.dataset.i;setTimeout(()=>{
           const shown=C[i]>10?10:C[i];let cs='';for(let j=C[i]-shown;j<C[i];j++)cs+=comment(i,j);
           document.body.insertAdjacentHTML('beforeend','<section data-viewname="DProfileStoryDetailLayerView" class="lyWrap layer_wrap" role="document"><div class="lyPostViewer"><div class="postViewer"><div data-viewname="DProfileStoryDetailView" class="cPostCard"><div class="postWriterInfoWrap"><span class="profileStoryDetailWriterBox"><em>${name}</em><span>의 스토리</span></span><div class="postListInfoWrap"><time class="time">'+D[i]+'</time></div></div><div class="postMain"><div data-viewname="DProfileStoryDetailCollectionView"><div class="postText"><div class="txtBody">'+FULL[i].replace(/\\n/g,'<br>')+'</div></div></div></div><div data-viewname="DBandProfileStoryReactionMainView"><div class="postCount"><button class="uEmotionView _emotionCountRegion trap"><span class="count">'+R[i]+'</span></button><button type="button" class="comment">댓글 <span class="count _commentCountSpan">'+C[i]+'</span></button></div><div class="addCol _emoteMainBtn"><a href="#" class="addStatus">표정짓기</a></div><div data-viewname="DBandProfileStoryCommentListView" class="commentList"><div data-viewname="DProfileCommentCollectionView" class="sCommentList">'+(C[i]>shown?'<button type="button" class="prevComment _prevCommentBtn">이전 댓글 '+(C[i]-shown)+'개 보기</button>':'')+cs+'</div></div><div class="cCommentWriteNew _commentInputRegion"><textarea class="commentWrite"></textarea><button type="submit" class="_sendMessageButton">보내기</button></div></div></div></div></div><button type="button" class="btnCloseLyPost _btnClose">닫기</button></section>');
@@ -141,10 +146,18 @@ const band = http.createServer((req, res) => {
             <div class="reactionBox"><button type="button" class="like _likeEmotionRegion"><div class="uLike"><span class="count _countBtn">7</span></div></button><a href="/band/${BAND}/member/${key}" class="comment _commentBtn"><span class="count _commentCountSpan">2</span></a></div></div>
           <button type="button" class="profileBox _imgAnchor"><span class="profileInner"><img class="profileImage" src="http://127.0.0.1:4589/img/avatar_garam.png" width="120" height="120" alt="프로필 사진"></span></button>
           <div class="profileInfoWrap"><div class="profileInfoBox"><strong class="userName">${name}</strong><span class="userNickname _userDesc">B 27 XX 168 배우</span></div></div></article>
-          <section><h3>스토리</h3><ol data-viewname="DProfileStoryListView" class="storyList">${story(0)}${story(1)}</ol><template id="more">${story(2)}${story(3)}</template></section></div></div>`,
+          <section><h3>스토리</h3><ol data-viewname="DProfileStoryListView" class="storyList"></ol><template id="first">${key === "MKDAON" ? story(0) + story(1) : `<div><div class="uEmpty"><strong class="uEmptyLargeBoldTitle">아직 작성된 스토리가 없어요.</strong></div></div>`}</template><template id="more">${key === "MKDAON" ? story(2) + story(3) : ""}</template></section></div></div>`,
           script,
         ),
       );
+    }
+    if (tab === "photo") {
+      // 인물 화면 '사진' 탭(실제 저장 표본 구조). 스크롤하면 더 불러온다. 다온만 사진이 있다
+      const name = key === "MKDAON" ? "다온" : "나래";
+      const ph = (i) => `<li data-viewname="DBandMemberPhotoListItemView" class="album"><a href="/band/${BAND}/member/${key}/photo#" class="_link trap"><img class="_img" src="http://127.0.0.1:4589/img/${i % 2 ? "post_photo_2.png" : "avatar_garam.png"}?n=${i}" width="120"></a></li>`;
+      const list = key === "MKDAON" ? `<ul data-viewname="DBandMemberPhotoListView" class="albumImages">${[0, 1, 2, 3].map(ph).join("")}</ul>` : `<div class="uEmpty">사진이 없습니다.</div>`;
+      const script = `window.__traps=0;document.addEventListener('click',e=>{if(e.target.closest('.trap'))window.__traps++},true);let more=${key === "MKDAON"};window.addEventListener('scroll',()=>{if(more&&innerHeight+scrollY>=document.body.scrollHeight-50){more=false;setTimeout(()=>document.querySelector('.albumImages').insertAdjacentHTML('beforeend',${JSON.stringify([4, 5].map(ph).join(""))}),300)}});`;
+      return send(200, page(`<div class="accountSectionHeader"><header class="header"><h1 class="title"><span class="sf_color">${name}</span>님의 작성글</h1></header></div><div data-viewname="DBandMemberPhotoLayoutView" class="sAlbumSection" style="min-height:1200px">${list}</div>`, script));
     }
     const name = key === "MKDAON" ? "다온" : "나래";
     const head = `<div class="accountSectionHeader"><div class="uHeaderWrap"><header class="header"><h1 class="title"><span class="sf_color">${name}</span>님의 글</h1></header></div>

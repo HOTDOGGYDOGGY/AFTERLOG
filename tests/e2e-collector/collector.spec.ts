@@ -412,6 +412,8 @@ test("인물 프로필 저장: 스토리 상세를 열어 전문·댓글(이전 
   await expect(view.locator("#story-2 .counts")).toContainText("이 스토리의 표정 4 · 댓글 18");
   await expect(view.locator("#profile")).toContainText("프로필 표정");
   await expect(view.locator("#photos")).toContainText("사진 이력 확인 못 함");
+  // 인물 화면 '사진' 탭: 스크롤로 더 불러온 것까지 6장, 사진을 누르지 않음
+  await expect(view.locator("#member-photos .g-img")).toHaveCount(6);
   expect(await view.locator(".face").getAttribute("src")).toMatch(/^data:image\//);
   expect(await view.evaluate(() => document.querySelectorAll("script").length)).toBe(0);
   await view.screenshot({ path: `${OUT}/11-profile-structured.png`, fullPage: true });
@@ -449,7 +451,7 @@ test("인물 프로필 저장: 스토리 상세를 열어 전문·댓글(이전 
   await band.close();
 });
 
-test("주소가 그대로인 프로필 팝업: 열린 인물만 읽고(배경 목록·다음 프로필 누르지 않음) 인물 연결 미확인으로 저장", async () => {
+test("주소가 그대로인 프로필 팝업: 기본 정보를 읽고 '스토리 보기'로 인물 주소를 알아내 프로필 전체(스토리·댓글)까지, 사용자 화면은 되돌림", async () => {
   const band = await ctx.newPage();
   await band.goto(`${BAND}/member`);
   const bar = band.locator("#afterlog-collector-bar");
@@ -458,25 +460,45 @@ test("주소가 그대로인 프로필 팝업: 열린 인물만 읽고(배경 �
   // 주소는 그대로인데 막대가 팝업을 알아본다
   await expect(bar.getByRole("button", { name: "이 프로필 저장" })).toBeVisible({ timeout: 5000 });
   expect(band.url()).toBe(`${BAND}/member`);
-  const mgrPromise = ctx.waitForEvent("page");
+  let mgrPromise = ctx.waitForEvent("page");
   await bar.getByRole("button", { name: "이 프로필 저장" }).click();
-  const mgr = await mgrPromise;
+  let mgr = await mgrPromise;
   await mgr.waitForLoadState();
-  await waitStatus(mgr, /끝남/, 60_000);
-  const tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await waitStatus(mgr, /끝남/, 180_000);
+  let tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await expect(tile.locator("b")).toHaveText("스토리 4");
   await expect(tile).toContainText("다온");
-  await expect(tile).toContainText("스토리");
   const viewP = ctx.waitForEvent("page");
   await tile.getByRole("button", { name: "보관본 보기" }).click();
   const view = await viewP;
   await view.waitForLoadState();
   await expect(view.locator("h1")).toHaveText("다온");
-  await expect(view.locator("body")).toContainText("원본 인물 연결 미확인");
-  await expect(view.locator("body")).toContainText("팝업 소개 2");
-  await expect(view.locator("body")).not.toContainText("나래");
-  await expect(view.locator("#profile")).toContainText("프로필 표정확인 못 함");
+  await expect(view.locator("body")).not.toContainText("원본 인물 연결 미확인");
+  await expect(view.locator("body")).toContainText("'스토리 보기'로 인물 주소를 확인");
+  await expect(view.locator("#story-2 .comments > li")).toHaveCount(18);
+  await expect(view.locator("#profile")).toContainText("프로필 표정7");
+  await expect(view.locator("a", { hasText: "밴드에서 열기" }).first()).toHaveAttribute("href", /\/member\/MKDAON\/profile$/);
   await view.close();
-  expect(await band.evaluate(() => (window as unknown as { __traps: number }).__traps)).toBe(0);
+  // 사용자 탭은 멤버 목록으로 돌아와 있고, 하트·채팅·다음 프로필은 누르지 않았다
+  await expect(band).toHaveURL(`${BAND}/member`);
+  expect(await band.evaluate(() => (window as unknown as { __traps(): number }).__traps())).toBe(0);
+  await mgr.close();
+
+  // 스토리가 0개인 인물: '스토리 보기'가 없으면 '작성글 보기'로 주소만 바꿔 알아낸다
+  await band.getByRole("button", { name: "나래" }).click();
+  await expect(bar.getByRole("button", { name: "이 프로필 저장" })).toBeVisible({ timeout: 5000 });
+  mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "이 프로필 저장" }).click();
+  mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  await waitStatus(mgr, /끝남/, 180_000);
+  tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await expect(tile).toContainText("나래");
+  // 밴드가 '아직 작성된 스토리가 없어요'라고 보여 주면 0개 확인(팝업 수도 0이라 어긋남 없음)
+  await expect(tile.locator("b")).toHaveText("스토리 0");
+  await expect(tile).not.toContainText("원인 미확인");
+  await expect(band).toHaveURL(`${BAND}/member`);
+  expect(await band.evaluate(() => (window as unknown as { __traps(): number }).__traps())).toBe(0);
   await mgr.close();
   await band.close();
 });

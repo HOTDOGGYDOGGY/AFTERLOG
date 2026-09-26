@@ -1,8 +1,9 @@
 // 수집 엔진 (수집 명세 8·9절). 수집 관리 페이지 안에서 돈다.
 // 상태는 전부 DB에 두고(메모리에 작업을 들고 있지 않음), 한 과제의 결과와 완료 표시는 한 트랜잭션에서 확정한다.
 // 창이 닫히거나 확장이 업데이트되어도 점유(lease)가 끝난 과제는 다시 대기열로 돌아가 이어받는다.
-import { parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
-import { parseBandProfileDocument, profileImages } from "../../src/importers/band/profile";
+import { imageRefFromSrc, parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
+import { bandOriginalImage, bandProfileUrl, mergeProfileRecords, parseBandProfileDocument, profileImages, type BandProfileRecord } from "../../src/importers/band/profile";
+import type { ProfileExtraction } from "./page/profile";
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type SelectReason, type Selection, type Task } from "./db";
 import { parseKoreanDateTime } from "../../src/importers/band/time";
@@ -736,19 +737,23 @@ export class Engine {
 
   /**
    * 인물 프로필: 구조 자료(기본 정보·스토리·스토리 상세의 전문·반응 수·댓글) + 보관 화면(스냅숏).
-   * 프로필 페이지는 수집 탭에서 열고, 주소가 바뀌지 않는 팝업은 사용자 탭에서 그대로 읽는다(누르지 않음).
+   * 프로필 페이지는 수집 탭에서 연다. 주소가 바뀌지 않는 팝업은 먼저 그 탭에서 기본 정보를 읽고, '스토리 보기'(없으면 '작성글 보기')를
+   * 눌러 인물 주소를 알아낸 뒤(사용자 화면은 되돌림) 그 인물의 프로필 페이지를 수집 탭에서 전부 모은다.
    * 한 영역이 모자라도 먼저 읽은 기본 정보는 저장한다(성공/실패 하나로 뭉개지 않음).
    */
   private async runProfile(job: Job, task: Task, diag: DiagRecorder): Promise<{ ok: true } | { ok: false; code: string; text: string; retry: boolean; stopJob?: "needsUser" }> {
     const br = this.deps.browser;
     const observedAt = iso(this.now());
     const loginStop = { ok: false as const, code: "loginRequired", text: "밴드에 로그인해야 합니다. 로그인한 뒤 이어받기를 누르세요.", retry: false, stopJob: "needsUser" as const };
-    let cap: ProfileCapture;
-    let partialWhy: string[] = [];
-    let queue: string[] = [];
+    const partialWhy: string[] = [];
+    let popup: BandProfileRecord | null = null;
+    let popupHtml = "";
+    let popupImages: string[] = [];
+    let pageUrl = task.url;
+    let via: "story" | "posts" | null = null;
 
     if (task.tabId !== undefined) {
-      // 팝업(멤버 목록 등 같은 주소 위에 열린 프로필)
+      // 1) 팝업의 기본 정보(누르지 않음)
       if (!br.captureProfilePopup) return { ok: false, code: "navigationFailed", text: "이 브라우저에서는 팝업을 읽을 수 없습니다.", retry: false };
       const ex = await br.captureProfilePopup(task.tabId);
       await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
@@ -762,83 +767,138 @@ export class Engine {
           retry: false,
         };
       }
-      const record = parseBandProfileDocument(new DOMParser().parseFromString(ex.html ?? "", "text/html"), { pageUrl: ex.pageUrl, observedAt })[0] ?? null;
-      if (!record) return { ok: false, code: "selectorMissing", text: "팝업에서 프로필 내용을 알아보지 못했습니다(화면 구조 변경 가능).", retry: false };
-      cap = {
-        id: crypto.randomUUID(),
-        jobId: job.id,
-        taskId: task.id,
-        bandNo: record.bandNo ?? job.bandNo ?? "",
-        memberKey: record.memberKey ?? "",
-        url: ex.pageUrl,
-        name: record.name,
-        description: record.description,
-        html: ex.html ?? "",
-        css: "",
-        cssTruncated: false,
-        imageUrls: ex.imageUrls,
-        stories: [],
-        capturedAt: observedAt,
-        collectorVersion: COLLECTOR_VERSION,
-        record,
-        surface: "profilePopup",
-      };
-      queue = ex.imageUrls;
-      if (record.stories.state === "notCollected") partialWhy.push(`스토리 ${record.storyCountShown ?? ""}개는 팝업에 없어 모으지 않음('스토리 보기'로 프로필 화면을 연 뒤 '이 프로필 저장')`);
-    } else {
-      const m = parseMemberUrl(task.url);
-      if (!br.captureProfile || !m) return { ok: false, code: "navigationFailed", text: "인물 프로필 주소가 아닙니다.", retry: false };
+      popup = parseBandProfileDocument(new DOMParser().parseFromString(ex.html ?? "", "text/html"), { pageUrl: ex.pageUrl, observedAt })[0] ?? null;
+      if (!popup) return { ok: false, code: "selectorMissing", text: "팝업에서 프로필 내용을 알아보지 못했습니다(화면 구조 변경 가능).", retry: false };
+      popupHtml = ex.html ?? "";
+      popupImages = ex.imageUrls;
+      pageUrl = ex.pageUrl;
+      // 2) 인물 주소 알아내기: 인물 화면 위 팝업이라 이미 확인됐으면 누르지 않는다. 아니면 '스토리 보기' 또는 '작성글 보기'만 누름
+      const res = popup.identity === "confirmed" && popup.bandNo && popup.memberKey
+        ? { ok: true, memberUrl: `${new URL(ex.pageUrl).origin}/band/${popup.bandNo}/member/${encodeURIComponent(popup.memberKey)}/profile`, via: null, reason: undefined }
+        : br.resolvePopupMember
+          ? await br.resolvePopupMember(task.tabId)
+          : null;
+      const m = res?.ok ? parseMemberUrl(res.memberUrl!) : null;
+      await diag.event(task.id, { stage: "profile", state: m ? "ok" : "partial", ...(m ? {} : { code: "selectorMissing" as const }) });
+      if (m) {
+        pageUrl = `${m.origin}/band/${m.bandNo}/member/${m.memberKey}/profile`;
+        via = res?.via ?? null;
+      }
+      else {
+        partialWhy.push(
+          res?.reason === "noLink"
+            ? "팝업에 '스토리 보기'·'작성글 보기'가 없어 인물 주소를 알 수 없음(팝업의 기본 정보만 저장)"
+            : "'스토리 보기'를 눌러도 주소가 바뀌지 않아 인물 주소를 알 수 없음(팝업의 기본 정보만 저장)",
+        );
+      }
+    }
+
+    // 3) 프로필 페이지 전체(스토리·상세·댓글) + 보관 화면
+    const m = parseMemberUrl(pageUrl);
+    let page: { record: BandProfileRecord | null; ex: ProfileExtraction } | null = null;
+    if (m && br.captureProfile) {
       await this.gate();
-      const { ex, loadMs } = await br.captureProfile(task.url);
+      const { ex, loadMs } = await br.captureProfile(pageUrl);
       await diag.event(task.id, { stage: "pageLoad", state: ex.ok ? "ok" : "fail", wait: durationBucket(loadMs), page: ex.reason === "login" ? "login" : "profile", attempt: task.attempts + 1 });
-      if (!ex.ok) {
-        if (ex.reason === "login") return loginStop;
+      if (!ex.ok && ex.reason === "login") return loginStop;
+      const probes: Partial<Record<ProbeId, CountBucket>> = {};
+      for (const [k, v] of Object.entries(ex.probeCounts ?? {})) probes[k as ProbeId] = countBucket(v);
+      if (Object.keys(probes).length) await diag.event(task.id, { stage: "probes", state: ex.ok ? "ok" : "fail", probes });
+      if (ex.ok) {
+        const record = ex.structureHtml ? parseBandProfileDocument(new DOMParser().parseFromString(ex.structureHtml, "text/html"), { pageUrl: ex.pageUrl, observedAt }).find((r) => r.surface === "profilePage") ?? null : null;
+        // 연 화면이 요청한 인물인지(다른 인물이 열렸으면 섞지 않는다)
+        if (record?.memberKey && record.memberKey !== m.memberKey) {
+          await diag.event(task.id, { stage: "scope", state: "fail", code: "accountChanged" });
+          if (!popup) return { ok: false, code: "navigationFailed", text: "요청한 인물과 다른 프로필이 열렸습니다. 다시 시도하세요.", retry: true };
+          partialWhy.push("알아낸 주소에서 다른 인물의 프로필이 열려 팝업 정보만 저장");
+        } else if (popup && record?.name && popup.name && record.name.replace(/\s+/g, "") !== popup.name.replace(/\s+/g, "")) {
+          partialWhy.push(`알아낸 주소의 프로필 이름('${record.name}')이 팝업('${popup.name}')과 달라 합치지 않음(팝업 정보만 저장)`);
+        } else page = { record, ex };
+      } else if (!popup) {
         await diag.event(task.id, { stage: "profile", state: "fail", code: "selectorMissing" });
         return { ok: false, code: "selectorMissing", text: "프로필 화면 내용을 찾지 못했습니다(권한·화면 구조 변경 가능).", retry: true };
+      } else partialWhy.push("인물 주소는 알아냈지만 프로필 화면 내용을 찾지 못해 팝업 정보만 저장");
+    } else if (!popup) return { ok: false, code: "navigationFailed", text: "인물 프로필 주소가 아닙니다.", retry: false };
+
+    // 3-2) 인물 화면 '사진' 탭(이 인물이 올린 사진). 원본과 목록 축소본을 함께 받아 둔다
+    let photos: BandProfileRecord["memberPhotos"] | undefined;
+    let photoUrls: string[] = [];
+    if (m && br.readMemberPhotos && (page || popup)) {
+      await this.gate();
+      const pr = await br.readMemberPhotos(`${m.origin}/band/${m.bandNo}/member/${m.memberKey}/photo`).catch(() => null);
+      if (pr?.reason === "login") return loginStop;
+      if (pr?.ok) {
+        const items = pr.srcs.map((src) => {
+          const orig = bandOriginalImage(src);
+          return { image: { src: orig, ref: imageRefFromSrc(orig) ?? null }, thumb: orig !== src ? { src, ref: imageRefFromSrc(src) ?? null } : null };
+        });
+        photos = { state: items.length ? "collected" : pr.empty ? "none" : "unrecognized", items };
+        photoUrls = items.flatMap((x) => [x.image.src, ...(x.thumb ? [x.thumb.src] : [])]);
+        await diag.event(task.id, { stage: "profile", state: "ok", count: countBucket(items.length) });
+      } else {
+        photos = { state: "unrecognized", items: [] };
+        partialWhy.push("'사진' 탭을 알아보지 못함(구조 미인식 또는 표시되지 않음)");
       }
-      const record = ex.structureHtml ? parseBandProfileDocument(new DOMParser().parseFromString(ex.structureHtml, "text/html"), { pageUrl: ex.pageUrl, observedAt }).find((r) => r.surface === "profilePage") ?? null : null;
-      // 연 화면이 요청한 인물인지(주소가 달라졌거나 다른 인물이 열렸으면 섞지 않는다)
-      if (record && record.memberKey && record.memberKey !== m.memberKey) {
-        await diag.event(task.id, { stage: "scope", state: "fail", code: "accountChanged" });
-        return { ok: false, code: "navigationFailed", text: "요청한 인물과 다른 프로필이 열렸습니다. 다시 시도하세요.", retry: true };
-      }
-      const sd = ex.storyDetails;
-      if (!record) partialWhy.push("프로필 화면 구조를 알아보지 못해 보관 화면만 저장(스토리 전문·댓글 없음)");
+    }
+
+    // 4) 합치기: 팝업(소개 등) + 프로필 페이지(스토리·수)
+    let record: BandProfileRecord | null = page?.record ?? null;
+    if (popup) {
+      const known = m ? { bandNo: m.bandNo, memberKey: m.memberKey, identity: "confirmed" as const, profileUrl: bandProfileUrl(m.bandNo, m.memberKey), notes: popup.notes.filter((n) => !/연결 미확인/.test(n)) } : {};
+      const p2: BandProfileRecord = { ...popup, ...known };
+      record = record ? mergeProfileRecords(p2, { ...record, observedAt }, { sameObservation: true }).record : p2;
+      if (record && m) record.notes = [...record.notes.filter((n) => !/연결 미확인/.test(n)), `프로필 팝업에서 ${via === "posts" ? "'작성글 보기'" : "'스토리 보기'"}로 인물 주소를 확인했습니다.`];
+    }
+    if (record && photos) record.memberPhotos = photos;
+    // 팝업은 스토리가 있다고 했는데 프로필 화면은 없다고 할 때: 성공으로 넘기지 않고 알린다(원인 미확인)
+    if (popup?.storyCountShown && record && record.stories.items.length === 0 && page)
+      partialWhy.push(`팝업에는 스토리 ${popup.storyCountShown}개로 표시됐지만 프로필 화면에는 스토리가 없다고 나옴(공개 범위·삭제 등 원인 미확인)`);
+    if (page) {
+      const sd = page.ex.storyDetails;
+      if (!page.record) partialWhy.push("프로필 화면 구조를 알아보지 못해 보관 화면만 저장(스토리 전문·댓글 없음)");
       else {
-        if (record.stories.state === "unrecognized") partialWhy.push("스토리 목록을 찾지 못함(구조 미인식 또는 표시되지 않음)");
+        if (page.record.stories.state === "unrecognized") partialWhy.push("스토리 목록을 찾지 못함(구조 미인식 또는 표시되지 않음)");
         if (sd && sd.opened < sd.listed) partialWhy.push(`스토리 상세 ${sd.listed}개 중 ${sd.opened}개만 열어 읽음${sd.stoppedEarly ? "(시간 한도·닫기 실패로 멈춤)" : ""}`);
-        const short = record.stories.items.filter((x) => x.commentsState === "partial").length;
+        const short = page.record.stories.items.filter((x) => x.commentsState === "partial").length;
         if (short) partialWhy.push(`댓글이 모자란 스토리 ${short}개`);
       }
       await diag.event(task.id, {
         stage: "profile",
         state: partialWhy.length ? "partial" : "ok",
-        count: countBucket(record?.stories.items.length ?? ex.stories.length),
+        count: countBucket(page.record?.stories.items.length ?? page.ex.stories.length),
         candidates: countBucket(sd?.listed ?? 0),
         ...(sd?.mismatched ? { code: "multipleScopes" as const } : {}),
       });
-      cap = {
-        id: crypto.randomUUID(),
-        jobId: job.id,
-        taskId: task.id,
-        bandNo: m.bandNo,
-        memberKey: m.memberKey,
-        url: task.url,
-        name: record?.name ?? ex.name,
-        description: record?.description ?? ex.description,
-        html: ex.html!,
-        css: ex.css,
-        cssTruncated: ex.cssTruncated,
-        imageUrls: ex.imageUrls,
-        stories: ex.stories,
-        capturedAt: observedAt,
-        collectorVersion: COLLECTOR_VERSION,
-        record,
-        surface: "profilePage",
-      };
-      queue = [...new Set([...ex.imageUrls, ...(record ? profileImages(record).map((i) => i.src).filter((u) => /^https?:/.test(u)) : [])])];
     }
-    const record = cap.record;
+    if (record && record.surface === "profilePopup" && record.stories.state === "notCollected" && !page)
+      partialWhy.push(`스토리 ${record.storyCountShown ?? ""}개는 모으지 못함`);
+    // 모자라면 구조 진단(이름·글 없이 구조와 확인 위치만): 프로필 화면이 있으면 수집 탭, 없으면 팝업이 있던 사용자 탭
+    if (partialWhy.length && job.options.diagnostics) {
+      const target = page || task.tabId === undefined ? {} : { tabId: task.tabId };
+      await diag.structure(await br.sampleStructure(target, "profile").catch(() => null));
+    }
+
+    const ex = page?.ex;
+    const cap: ProfileCapture = {
+      id: crypto.randomUUID(),
+      jobId: job.id,
+      taskId: task.id,
+      bandNo: m?.bandNo ?? record?.bandNo ?? job.bandNo ?? "",
+      memberKey: m?.memberKey ?? "",
+      url: m ? pageUrl : task.url,
+      name: record?.name ?? ex?.name ?? null,
+      description: record?.description ?? ex?.description ?? null,
+      html: ex?.html ?? popupHtml,
+      css: ex?.css ?? "",
+      cssTruncated: ex?.cssTruncated ?? false,
+      imageUrls: [...new Set([...(ex?.imageUrls ?? []), ...popupImages])],
+      stories: ex?.stories ?? [],
+      capturedAt: observedAt,
+      collectorVersion: COLLECTOR_VERSION,
+      record,
+      surface: page ? "profilePage" : "profilePopup",
+    };
+    const queue = [...new Set([...cap.imageUrls, ...photoUrls, ...(record ? profileImages(record).map((i) => i.src).filter((u) => /^https?:/.test(u)) : [])])];
     const storyCount = record ? record.stories.items.length : cap.stories.length;
     await cdb().transaction("rw", [cdb().profiles, cdb().tasks], async () => {
       await cdb().profiles.where("taskId").equals(task.id).delete();

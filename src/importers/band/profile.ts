@@ -71,7 +71,8 @@ export interface BandProfileBasics {
 export interface BandProfileRecord extends BandProfileBasics {
   schema: typeof BAND_PROFILE_SCHEMA;
   platform: "band";
-  surface: "profilePage" | "profilePopup";
+  /** profilePage 프로필 화면 · profilePopup 팝업 · memberPage 인물의 작성글/사진/댓글 화면(사진만 있는 저장본 등) */
+  surface: "profilePage" | "profilePopup" | "memberPage";
   bandNo: string | null;
   memberKey: string | null;
   /** confirmed: 프로필 주소·링크로 인물 확인 · unconfirmed: 팝업 등 식별자 없음(이름으로 합치지 않음) */
@@ -85,6 +86,8 @@ export interface BandProfileRecord extends BandProfileBasics {
   /** 사진 이력: 실제 화면 표본이 없어 '확인 못 함' */
   photoHistory: { state: "unrecognized" | "none" | "collected"; items: { image: BandImageRef; timeText: string | null }[] };
   stories: { state: "collected" | "none" | "notCollected" | "unrecognized"; items: BandProfileStory[] };
+  /** 인물 화면 '사진' 탭(이 인물이 올린 사진). 원본 주소와 목록의 축소본 */
+  memberPhotos?: { state: "collected" | "none" | "notCollected" | "unrecognized"; items: { image: BandImageRef; thumb: BandImageRef | null }[] };
   /** 앞선 관측(합치기에서 기본 정보가 바뀌면 여기 남긴다) */
   history?: BandProfileBasics[];
   notes: string[];
@@ -136,6 +139,30 @@ export function parseBandMemberPath(url: string | null | undefined): { bandNo: s
   if (!key || key === "#") return null;
   return { bandNo: m[1], memberKey: key, profile: !!m[3] };
 }
+
+/** 인물 화면 주소(/member/KEY, /member/KEY/post|photo|comment|profile) */
+export function parseBandMemberAnyPath(url: string | null | undefined): { bandNo: string; memberKey: string; tab: string | null } | null {
+  if (!url) return null;
+  let u: URL;
+  try {
+    u = new URL(url, "https://www.band.us/");
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)band\.us$/.test(u.hostname)) return null;
+  const m = u.pathname.match(/^\/band\/(\d+)\/member\/([^/]+)(?:\/(post|photo|comment|profile))?\/?$/);
+  if (!m) return null;
+  let key: string;
+  try {
+    key = decodeURIComponent(m[2]);
+  } catch {
+    return null;
+  }
+  return key ? { bandNo: m[1], memberKey: key, tab: m[3] ?? null } : null;
+}
+
+/** 밴드 사진 주소의 원본(목록은 ?type=… 축소본) */
+export const bandOriginalImage = (src: string) => (/^https?:\/\/[^/]*pstatic\.net\//.test(src) ? src.replace(/\?type=[^&#]*(&|$)/, (_m, amp) => (amp ? "?" : "")).replace(/\?$/, "") : src);
 
 export const bandProfileUrl = (bandNo: string, memberKey: string) => `https://www.band.us/band/${bandNo}/member/${encodeURIComponent(memberKey)}/profile`;
 /** 같은 인물 판정 키(P02: 이름이 같아도 식별자가 다르면 다른 인물) */
@@ -319,6 +346,9 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       }
     const identity = bandNo && memberKey ? "confirmed" : "unconfirmed";
     if (identity === "unconfirmed") notes.push("프로필 주소를 확인하지 못해 원본 인물 연결 미확인으로 보관했습니다.");
+    // 밴드가 직접 '스토리가 없다'고 보여 준 경우(실제 화면: .uEmpty '아직 작성된 스토리가 없어요')
+    const emptyShown = !stories.length && !!listEl?.querySelector(".uEmpty");
+    if (emptyShown) notes.push(`밴드 화면이 스토리가 없다고 표시했습니다('${txt(listEl!.querySelector(".uEmpty strong, .uEmpty")).slice(0, 40)}').`);
     out.push({
       schema: BAND_PROFILE_SCHEMA,
       platform: "band",
@@ -344,12 +374,53 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
     });
   }
 
+  // 인물 화면(작성글·사진·댓글 탭)의 머리글 이름: 이 화면 위에 뜬 팝업이 같은 사람인지 확인할 때 쓴다
+  const headerName = txt(root.querySelector(".accountSectionHeader .title .sf_color")) || null;
+  const memberPage = parseBandMemberAnyPath(pageUrl);
+  // 인물 화면의 '사진' 탭
+  const photoList = root.querySelector("[data-viewname='DBandMemberPhotoListView']");
+  const photoEmpty = !photoList && !!root.querySelector("[data-viewname='DBandMemberPhotoLayoutView'] .uEmpty");
+  if ((photoList || photoEmpty) && memberPage && !out.some((r) => r.surface === "profilePage")) {
+    const items = photoList
+      ? Array.from(photoList.querySelectorAll("[data-viewname='DBandMemberPhotoListItemView'] img"))
+          .map((i) => i.getAttribute("src"))
+          .filter((x): x is string => !!x && !x.startsWith("data:"))
+          .map((src) => ({ image: img(bandOriginalImage(src))!, thumb: bandOriginalImage(src) !== src ? img(src) : null }))
+      : [];
+    out.push({
+      schema: BAND_PROFILE_SCHEMA,
+      platform: "band",
+      surface: "memberPage",
+      bandNo: memberPage.bandNo,
+      memberKey: memberPage.memberKey,
+      identity: "confirmed",
+      sourceUrl: pageUrl,
+      profileUrl: bandProfileUrl(memberPage.bandNo, memberPage.memberKey),
+      observedAt,
+      name: headerName,
+      description: null,
+      info: null,
+      joinInfo: null,
+      avatar: null,
+      cover: null,
+      reactionsShown: null,
+      commentsShown: null,
+      storyCountShown: null,
+      photoHistory: { state: "unrecognized", items: [] },
+      stories: { state: "notCollected", items: [] },
+      memberPhotos: { state: items.length ? "collected" : "none", items },
+      notes: [],
+    });
+  }
+
   for (const layer of Array.from(root.querySelectorAll("[data-viewname='DProfileLayerView']"))) {
     if (hidden(layer)) continue;
     const band = Array.from(layer.querySelectorAll("a[href]"))
       .map((a) => (a.getAttribute("href") ?? "").match(/\/band\/(\d+)\//)?.[1])
       .find(Boolean);
-    const fromUrl = parseBandMemberPath(pageUrl);
+    const name = txt(layer.querySelector(".cProfileViewCard .userName, .userName")) || null;
+    // 주소가 프로필 주소이거나, 인물 화면(작성글·사진·댓글) 위에 뜬 팝업이고 이름이 그 화면 머리글과 같을 때만 그 인물로 본다
+    const fromUrl = parseBandMemberPath(pageUrl) ?? (memberPage && headerName && name && norm(headerName) === norm(name) ? { bandNo: memberPage.bandNo, memberKey: memberPage.memberKey, profile: false } : null);
     const storyCountShown = num(layer.querySelector("[data-viewname='DProfileStoryCountView'] em.count, [data-viewname='DProfileStoryCountView'] .count"));
     out.push({
       schema: BAND_PROFILE_SCHEMA,
@@ -362,7 +433,7 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       sourceUrl: pageUrl,
       profileUrl: fromUrl ? bandProfileUrl(fromUrl.bandNo, fromUrl.memberKey) : null,
       observedAt,
-      name: txt(layer.querySelector(".cProfileViewCard .userName, .userName")) || null,
+      name,
       description: txt(layer.querySelector("[data-viewname='DProfileDescriptionView'] ._userDesc")) || null,
       info: txt(layer.querySelector("[data-viewname='DProfileDescriptionView'] ._userInfo")) || null,
       joinInfo: txt(layer.querySelector(".joinInfo")) || null,
@@ -373,8 +444,10 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       commentsShown: num(layer.querySelector("._commentCountRegion")),
       storyCountShown,
       photoHistory: { state: "unrecognized", items: [] },
-      stories: { state: storyCountShown === 0 ? "none" : "notCollected", items: [] },
-      notes: fromUrl ? [] : ["주소가 바뀌지 않는 팝업이라 원본 인물 연결 미확인으로 보관했습니다. 같은 이름의 다른 인물과 합치지 않습니다."],
+      // 스토리 수가 표시되지 않거나 0이면 팝업이 보여 준 스토리는 없다(표본: 스토리 없는 인물은 '스토리 보기' 칸이 비어 있음)
+      // 스토리 수가 0이면 없음. 수가 비어 있고 '스토리 보기'도 없으면 0이라고 단정하지 않는다(확인 못 함)
+      stories: { state: storyCountShown === 0 ? "none" : storyCountShown === null && !layer.querySelector("a._storyAnchor") ? "unrecognized" : "notCollected", items: [] },
+      notes: fromUrl ? (parseBandMemberPath(pageUrl) ? [] : ["인물 화면 위에 뜬 팝업이고 이름이 화면 머리글과 같아 그 인물로 연결했습니다."]) : ["주소가 바뀌지 않는 팝업이라 원본 인물 연결 미확인으로 보관했습니다. 같은 이름의 다른 인물과 합치지 않습니다."],
     });
   }
   return out;
@@ -382,7 +455,7 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
 
 /** 모든 이미지 참조 */
 export function profileImages(r: BandProfileRecord): BandImageRef[] {
-  const all: (BandImageRef | null)[] = [r.avatar, r.cover, ...r.photoHistory.items.map((p) => p.image)];
+  const all: (BandImageRef | null)[] = [r.avatar, r.cover, ...r.photoHistory.items.map((p) => p.image), ...(r.memberPhotos?.items ?? []).flatMap((p) => [p.image, p.thumb])];
   for (const s of r.stories.items) {
     all.push(...s.images);
     for (const c of s.comments) all.push(c.authorAvatar, ...c.images);
@@ -398,7 +471,8 @@ export function isBandProfileRecord(x: unknown): x is BandProfileRecord {
 export function profileSummary(r: BandProfileRecord): string {
   const s = r.stories;
   const story = s.state === "collected" ? `스토리 ${s.items.length}개` : s.state === "none" ? "스토리 0개 확인" : s.state === "notCollected" ? `스토리 수집 안 함${r.storyCountShown ? `(표시 ${r.storyCountShown}개)` : ""}` : "스토리 확인 못 함";
-  return `${r.name ?? "이름 확인 못 함"} · ${story}${r.identity === "unconfirmed" ? " · 인물 연결 미확인" : ""}`;
+  const photos = r.memberPhotos?.state === "collected" ? ` · 작성 사진 ${r.memberPhotos.items.length}장` : "";
+  return `${r.name ?? "이름 확인 못 함"} · ${story}${photos}${r.identity === "unconfirmed" ? " · 인물 연결 미확인" : ""}`;
 }
 
 // ---------- 합치기(같은 인물의 새 관측) ----------
@@ -432,7 +506,7 @@ export interface ProfileMergeResult {
  * - 기본 정보: 더 늦은 관측을 표시하고, 바뀌었으면 앞 관측을 history에 남긴다. 새 관측에 없는 값(null)으로 기존 값을 지우지 않는다.
  * - 스토리·댓글: 같은 키는 하나로(전문이 생기면 보완), 새 키만 더한다. 반응 수는 더하지 않고 최신 관측값.
  */
-export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileRecord): ProfileMergeResult {
+export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileRecord, opts: { sameObservation?: boolean } = {}): ProfileMergeResult {
   const newer = (inc.observedAt ?? "") >= (old.observedAt ?? "");
   const [latest, earlier] = newer ? [inc, old] : [old, inc];
   const pick = <K extends keyof BandProfileBasics>(k: K) => (latest[k] ?? earlier[k]) as BandProfileBasics[K];
@@ -449,7 +523,8 @@ export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileReco
   };
   const history = [...(old.history ?? []), ...(inc.history ?? [])];
   const basicsChanged = !sameBasics(basicsOf(old), basics);
-  if (basicsChanged && !history.some((h) => h.observedAt === old.observedAt && sameBasics(h, old))) history.push(basicsOf(old));
+  // 같은 때 두 화면(팝업 + 프로필 페이지)에서 읽은 것은 앞선 관측이 아니다
+  if (basicsChanged && !opts.sameObservation && !history.some((h) => h.observedAt === old.observedAt && sameBasics(h, old))) history.push(basicsOf(old));
 
   let storiesAdded = 0;
   let commentsAdded = 0;
@@ -485,15 +560,28 @@ export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileReco
     hit.commentsState = commentsState(hit.commentsShown, hit.comments.length, hit.commentsState !== "notCollected" || s.commentsState !== "notCollected");
   }
   const storyState: BandProfileRecord["stories"]["state"] = items.length ? "collected" : old.stories.state === "none" || inc.stories.state === "none" ? "none" : old.stories.state === "unrecognized" ? inc.stories.state : old.stories.state;
+  // 작성 사진: 같은 사진(파일명)은 하나로
+  const photoKey = (p: { image: BandImageRef }) => p.image.ref ?? p.image.src;
+  const photoItems = [...(old.memberPhotos?.items ?? [])];
+  let photosAdded = 0;
+  for (const p of inc.memberPhotos?.items ?? [])
+    if (!photoItems.some((x) => photoKey(x) === photoKey(p))) {
+      photoItems.push(p);
+      photosAdded++;
+    }
+  const photoStates = [old.memberPhotos?.state, inc.memberPhotos?.state];
+  const memberPhotos: BandProfileRecord["memberPhotos"] = photoItems.length ? { state: "collected", items: photoItems } : photoStates.includes("none") ? { state: "none", items: [] } : (old.memberPhotos ?? inc.memberPhotos);
+  const rank = { profilePage: 3, profilePopup: 2, memberPage: 1 } as const;
   const record: BandProfileRecord = {
     ...old,
     ...basics,
-    surface: old.surface === "profilePage" || inc.surface === "profilePage" ? "profilePage" : "profilePopup",
+    memberPhotos,
+    surface: rank[inc.surface] > rank[old.surface] ? inc.surface : old.surface,
     storyCountShown: (newer ? inc.storyCountShown : old.storyCountShown) ?? old.storyCountShown ?? inc.storyCountShown,
     stories: { state: storyState, items },
     history: history.length ? history : undefined,
     notes: [...new Set([...old.notes, ...inc.notes])],
   };
-  const changed = basicsChanged || storiesAdded > 0 || commentsAdded > 0 || textsCompleted > 0 || JSON.stringify(old.stories.items.map((s) => [s.reactionsShown, s.commentsShown])) !== JSON.stringify(items.slice(0, old.stories.items.length).map((s) => [s.reactionsShown, s.commentsShown]));
+  const changed = basicsChanged || photosAdded > 0 || (old.memberPhotos?.state ?? null) !== (memberPhotos?.state ?? null) || storiesAdded > 0 || commentsAdded > 0 || textsCompleted > 0 || JSON.stringify(old.stories.items.map((s) => [s.reactionsShown, s.commentsShown])) !== JSON.stringify(items.slice(0, old.stories.items.length).map((s) => [s.reactionsShown, s.commentsShown]));
   return { record, storiesAdded, commentsAdded, textsCompleted, basicsChanged, changed };
 }

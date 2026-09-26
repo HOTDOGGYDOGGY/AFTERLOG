@@ -529,3 +529,16 @@ describe("프로필 명세 P0: 댓글 누적(C01~C06)", () => {
     expect(t2.result?.commentsFound).toBe(8);
   });
 });
+
+describe("프로필 화면 구조 진단(D01)", () => {
+  it("열린 스토리 상세를 범위로, 이름·글·주소·식별자 없이 구조와 확인 위치만", async () => {
+    const { PROFILE_PROBES } = await import("../../collector/src/diagnostics/probes");
+    const html = readFileSync(FIXTURE_DIR + "profile/profile-page.html", "utf8");
+    const args = { scope: "profile" as const, probes: PROFILE_PROBES, tags: [...STRUCT_TAGS], roles: [...STRUCT_ROLES], maxDepth: 8, maxNodes: 150 };
+    const r = await withDom(html, "https://www.band.us/band/100200300/member/AbCdEf%3D%3D%3D/profile", async () => sampleStructureInPage(args));
+    const out = JSON.stringify(r);
+    expect(out).toContain("storyDetail");
+    expect(out).not.toMatch(/[가-힣]/);
+    expect(out).not.toMatch(/band\.us|AbCdEf|100200300|profile_files/);
+  });
+});

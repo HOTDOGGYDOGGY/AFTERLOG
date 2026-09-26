@@ -4,11 +4,13 @@ import { BAND_ORIGINS, LIMITS, MIN_DELAY_MS } from "./config";
 import { BrowserError, fetchImage, type CollectorBrowser, type TabRole } from "./browser";
 import { captureProfileInPage, type ProfileExtraction } from "./page/profile";
 import { captureProfilePopupInPage, type ProfilePopupExtraction } from "./page/profilePopup";
+import { resolvePopupMemberInPage, type PopupMemberResult } from "./page/popupMember";
+import { readMemberPhotosInPage, type MemberPhotosRead } from "./page/memberPhotos";
 import { openCommentPostInPage, readMemberCommentsInPage, type MemberCommentsRound, type OpenCommentPostResult } from "./page/memberComments";
 import { extractPostInPage, type PostExtraction } from "./page/extractPost";
 import { discoverRoundInPage, type DiscoverRound } from "./page/discoverLinks";
 import { sampleStructureInPage } from "./diagnostics/structure";
-import { POST_PROBES } from "./diagnostics/probes";
+import { POST_PROBES, PROFILE_PROBES } from "./diagnostics/probes";
 import { STRUCT_ROLES, STRUCT_TAGS } from "./diagnostics/schema";
 import { STRUCT_LIMITS } from "./diagnostics/serializer";
 
@@ -155,19 +157,51 @@ export class ChromeBrowser implements CollectorBrowser {
     const { tabId, ms } = await this.navigate(url, "body");
     const t0 = Date.now();
     const ex = await this.exec<Parameters<typeof captureProfileInPage>, ProfileExtraction>(tabId, captureProfileInPage, [
-      { waitMs: Math.max(1000, MIN_DELAY_MS), maxRounds: 200, maxCssBytes: 3 * 1024 * 1024, readyMs: LIMITS.pageTimeoutMs, openStories: true, storyMs: 60_000, storiesTotalMs: LIMITS.expandMs },
+      { waitMs: Math.max(1000, MIN_DELAY_MS), maxRounds: 200, maxCssBytes: 3 * 1024 * 1024, readyMs: LIMITS.pageTimeoutMs, openStories: true, storyMs: 60_000, storiesTotalMs: LIMITS.expandMs, probes: PROFILE_PROBES },
     ]);
     return { ex, loadMs: ms + (Date.now() - t0) };
+  }
+
+  /**
+   * 팝업의 인물 주소 알아내기: 사용자 탭에서 '스토리 보기'(없으면 '작성글 보기')만 눌러 바뀐 주소를 읽고, 사용자 화면은 뒤로 돌려 둔다.
+   * 누른 뒤 페이지가 통째로 바뀌면 주입 스크립트가 끊기므로 탭 주소로 확인한다. 다시 누르지 않도록 재시도하지 않는다.
+   */
+  async resolvePopupMember(tabId: number): Promise<PopupMemberResult> {
+    const timeoutMs = 10_000;
+    const startUrl = (await chrome.tabs.get(tabId)).url ?? "";
+    let res: PopupMemberResult | null = null;
+    try {
+      const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: resolvePopupMemberInPage as never, args: [{ timeoutMs }] as never, world: "ISOLATED" });
+      res = (r?.result as PopupMemberResult | undefined) ?? null;
+    } catch {
+      res = null; // 페이지가 바뀌며 스크립트가 끊김: 아래에서 탭 주소로 확인
+    }
+    if (res && !res.ok && res.reason !== "noChange") return res;
+    let memberUrl = res?.memberUrl ?? null;
+    for (const t0 = Date.now(); !memberUrl && Date.now() - t0 < timeoutMs; ) {
+      await new Promise((r) => setTimeout(r, 200));
+      const u = (await chrome.tabs.get(tabId)).url ?? "";
+      if (u !== startUrl && /\/member\/[^/?#]+/.test(new URL(u).pathname)) memberUrl = u;
+    }
+    // 사용자가 보던 화면으로 되돌린다
+    if ((await chrome.tabs.get(tabId)).url !== startUrl) await chrome.tabs.goBack(tabId).catch(() => undefined);
+    if (!memberUrl) return { ok: false, reason: "noChange", memberUrl: null, via: res?.via ?? null, name: res?.name ?? null, startUrl };
+    return { ok: true, memberUrl, via: res?.via ?? null, name: res?.name ?? null, startUrl };
+  }
+
+  async readMemberPhotos(url: string) {
+    const { tabId } = await this.navigate(url, "body");
+    return this.exec<Parameters<typeof readMemberPhotosInPage>, MemberPhotosRead>(tabId, readMemberPhotosInPage, [{ waitMs: Math.max(1000, MIN_DELAY_MS), readyMs: LIMITS.pageTimeoutMs, maxRounds: 200 }]);
   }
 
   async captureProfilePopup(tabId: number) {
     return this.exec<[], ProfilePopupExtraction>(tabId, captureProfilePopupInPage, []);
   }
 
-  async sampleStructure(target: { url?: string; tabId?: number }) {
+  async sampleStructure(target: { url?: string; tabId?: number }, scope: "postCard" | "profile" = "postCard") {
     const tabId = target.tabId ?? (await this.collectTab("body"));
     return this.exec(tabId, sampleStructureInPage, [
-      { scope: "postCard", probes: POST_PROBES, tags: [...STRUCT_TAGS], roles: [...STRUCT_ROLES], maxDepth: STRUCT_LIMITS.maxDepth, maxNodes: STRUCT_LIMITS.maxNodes },
+      { scope, probes: scope === "profile" ? PROFILE_PROBES : POST_PROBES, tags: [...STRUCT_TAGS], roles: [...STRUCT_ROLES], maxDepth: STRUCT_LIMITS.maxDepth, maxNodes: STRUCT_LIMITS.maxNodes },
     ] as [Parameters<typeof sampleStructureInPage>[0]]);
   }
 
