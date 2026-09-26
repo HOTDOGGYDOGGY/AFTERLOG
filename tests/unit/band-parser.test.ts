@@ -149,3 +149,15 @@ describe("프로필 스토리 상세(.cPostCard가 붙은 모달)", () => {
     expect(parseBandHtml(html).documents).toHaveLength(0);
   });
 });
+
+describe("글 목록 카드(DPostListItemView)", () => {
+  it("A02 .cPostCard 없는 인물 작성글 목록의 카드를 글로 읽되 '검토 필요'(전문·댓글 미확인)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { FIXTURE_DIR } = await import("./helpers");
+    const r = parseBandHtml(readFileSync(FIXTURE_DIR + "profile/member-posts.html", "utf8"));
+    expect(r.documents).toHaveLength(2);
+    expect(r.documents.map((d) => blocksToPlainText(d.entries[0].blocks))).toEqual(["첫 번째 목록 글", "두 번째 목록 글"]);
+    expect(r.documents.every((d) => d.confidence === "review" && d.issues.some((i) => i.message.includes("목록 카드")))).toBe(true);
+    expect(r.documents[0].entries[0].time?.local).toBe("2019-11-09T23:54");
+  });
+});

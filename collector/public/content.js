@@ -3,6 +3,8 @@
      글 화면 '이 글 저장' · 밴드 화면 '이 밴드 글 전체 저장' · 인물 화면 '이 인물의 글 / 댓글만 / 댓글 단 글까지' ·
      인물 댓글 목록 '이 댓글 목록 저장 / 연결된 원글까지' · 공통 '골라서 저장…'(범위 정하기) · '수집 관리'
    - 누르면 확장의 수집 관리 창이 열려 작업을 만들고 바로 시작한다. 이 스크립트는 밴드에 글·댓글·표정을 쓰지 않고, 글 내용을 읽지 않는다.
+   - '직접 열며 수집'을 켜면 사용자가 여는 화면(프로필·스토리·팝업·사진 탭)이 바뀔 때마다 알려 수집 관리 창이 그 화면을 읽게 한다.
+     바뀜 판단에는 화면 구조 표시(열린 영역·항목 수·이름)만 쓰고 그 값은 어디에도 보내지 않는다. 누르거나 쓰지 않는다.
    - 밴드는 주소만 바뀌는 화면 전환을 하고, 프로필은 주소 변화 없이 팝업으로 열리기도 한다(실제 저장 표본).
      그래서 주소와 함께 '열린 프로필 팝업이 있는지'(화면 구조 표시만, 내용은 읽지 않음)를 주기적으로 확인해 버튼을 바꾼다. */
 (function () {
@@ -34,15 +36,15 @@
 
   // 화면마다 보여 줄 버튼(선택 수집 명세 6절). [동작, 글자, 강조]
   var ACTIONS = {
-    post: [["post", "이 글 저장", true], ["form", "골라서 저장…"]],
-    band: [["list", "이 밴드 글 전체 저장", true], ["form", "골라서 저장…"]],
-    member: [["sel:A", "이 인물의 글", true], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["sel:P", "이 프로필 저장"], ["form", "골라서 저장…"]],
+    post: [["post", "이 글 저장", true], ["follow", "직접 열며 수집"], ["form", "골라서 저장…"]],
+    band: [["list", "이 밴드 글 전체 저장", true], ["follow", "직접 열며 수집"], ["form", "골라서 저장…"]],
+    member: [["sel:A", "이 인물의 글", true], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["sel:P", "이 프로필 저장"], ["follow", "직접 열며 수집"], ["form", "골라서 저장…"]],
     // 프로필 화면: 주 버튼은 프로필 저장(스토리·스토리 댓글 포함). 글·댓글 목록은 따로 고른다
-    profile: [["sel:P", "이 프로필 저장", true], ["sel:A", "이 인물의 글"], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["form", "골라서 저장…"]],
+    profile: [["sel:P", "이 프로필 저장", true], ["sel:A", "이 인물의 글"], ["sel:B", "댓글만"], ["sel:ABC", "댓글 단 글까지"], ["follow", "직접 열며 수집"], ["form", "골라서 저장…"]],
     // 주소가 그대로인 프로필 팝업(멤버 목록 등 위에 열림)
-    popup: [["popup", "이 프로필 저장", true], ["form", "골라서 저장…"]],
-    memberComment: [["sel:B", "이 댓글 목록 저장", true], ["sel:BC", "연결된 원글까지"], ["form", "골라서 저장…"]],
-    search: [["search", "이 검색 결과 저장", true], ["form", "검색 조건 수정…"]],
+    popup: [["popup", "이 프로필 저장", true], ["follow", "직접 열며 수집"], ["form", "골라서 저장…"]],
+    memberComment: [["sel:B", "이 댓글 목록 저장", true], ["sel:BC", "연결된 원글까지"], ["follow", "직접 열며 수집"], ["form", "골라서 저장…"]],
+    search: [["search", "이 검색 결과 저장", true], ["follow", "직접 열며 수집"], ["form", "검색 조건 수정…"]],
   };
 
   var host = document.createElement("div");
@@ -115,14 +117,72 @@
       if (a[2]) b.className = "primary";
       acts.appendChild(b);
     });
+    if (following) setFollow(true, "");
   }
 
-  function flash(text) {
+  // ---- 직접 열며 수집 ----
+  var following = false;
+  var lastSig = "";
+  var sigTimer = null;
+  function screenSig() {
+    var parts = [location.href];
+    var vis = function (el) {
+      return !!el && el.getClientRects().length > 0;
+    };
+    var pops = document.querySelectorAll("[data-viewname='DProfileLayerView']");
+    for (var i = 0; i < pops.length; i++) if (vis(pops[i])) parts.push("pop:" + ((pops[i].querySelector(".userName") || {}).textContent || ""));
+    parts.push("page:" + !!document.querySelector("[data-viewname='DProfileView']"));
+    parts.push("stories:" + document.querySelectorAll("[data-viewname='DProfileStoryListItemView']").length);
+    parts.push("empty:" + !!document.querySelector("[data-viewname='DProfileStoryListView'] .uEmpty"));
+    var ds = document.querySelectorAll("[data-viewname='DProfileStoryDetailView']");
+    for (var j = 0; j < ds.length; j++)
+      if (vis(ds[j])) parts.push("detail:" + ((ds[j].querySelector("time") || {}).textContent || "") + ":" + ds[j].querySelectorAll(".cComment").length + ":" + ((ds[j].querySelector(".txtBody") || {}).textContent || "").length);
+    parts.push("photos:" + document.querySelectorAll("[data-viewname='DBandMemberPhotoListItemView']").length);
+    return parts.join("|");
+  }
+  function checkScreen() {
+    if (!following) return;
+    var sig = screenSig();
+    if (sig === lastSig) return;
+    lastSig = sig;
+    try {
+      chrome.runtime.sendMessage({ type: "afterlog-follow-change" }, function () {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) {
+      /* 무시 */
+    }
+  }
+  // 화면이 바뀌면 잠깐 모았다가(0.8초 조용할 때) 한 번만 알린다. 하트 애니메이션 같은 변화는 표시 값이 같아 무시된다
+  new MutationObserver(function (list) {
+    if (!following) return;
+    for (var i = 0; i < list.length; i++) if (host.contains(list[i].target)) return;
+    clearTimeout(sigTimer);
+    sigTimer = setTimeout(checkScreen, 800);
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden"] });
+  function setFollow(on, text) {
+    following = on;
+    var b = acts.querySelector('[data-act="follow"]');
+    if (b) {
+      b.textContent = on ? "직접 열며 수집 중 · 멈추기" : "직접 열며 수집";
+      b.className = on ? "primary" : "";
+    }
+    if (text) flash(text, on ? 8000 : 4000);
+    if (on) {
+      lastSig = "";
+      setTimeout(checkScreen, 300);
+    }
+  }
+  chrome.runtime.onMessage.addListener(function (msg) {
+    if (msg && msg.type === "afterlog-follow-state") setFollow(!!msg.on, msg.text || "");
+  });
+
+  function flash(text, ms) {
     note.textContent = text;
     note.hidden = false;
     setTimeout(function () {
       note.hidden = true;
-    }, 4000);
+    }, ms || 4000);
   }
 
   root.addEventListener("click", function (e) {
@@ -131,9 +191,20 @@
     if (!act || !e.isTrusted) return;
     if (act === "hide") return setHidden(true);
     if (act === "show") return setHidden(false);
+    if (act === "follow" && following) {
+      try {
+        chrome.runtime.sendMessage({ type: "afterlog-follow-stop" }, function () {
+          void chrome.runtime.lastError;
+        });
+      } catch (err) {
+        /* 무시 */
+      }
+      return setFollow(false, "직접 열며 수집을 멈췄습니다");
+    }
     try {
       chrome.runtime.sendMessage({ type: "afterlog-save", act: act, url: location.href }, function () {
         if (chrome.runtime.lastError) flash("확장을 다시 불러와 주세요(chrome://extensions)");
+        else if (act === "follow") flash("수집 관리 창을 연 채로, 저장할 인물의 프로필·스토리·사진 화면을 차례로 여세요", 8000);
         else if (act !== "manager" && act !== "form") flash("수집 관리 창에서 시작합니다");
       });
     } catch (err) {
@@ -151,4 +222,13 @@
   refresh();
   document.documentElement.appendChild(host);
   setInterval(refresh, 800);
+  // 페이지가 새로 열려도(주소 이동) 직접 열며 수집 중이면 이어서
+  try {
+    chrome.runtime.sendMessage({ type: "afterlog-follow-query" }, function (r) {
+      if (chrome.runtime.lastError) return;
+      if (r && r.on) setFollow(true, r.text || "");
+    });
+  } catch (e) {
+    /* 무시 */
+  }
 })();

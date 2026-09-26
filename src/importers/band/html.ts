@@ -489,6 +489,17 @@ export function parseBandHtml(html: string): BandPageParseResult {
   // 프로필 스토리 상세에도 .cPostCard가 붙는다(실제 저장본 확인). 일반 게시글로 해석하지 않는다
   const cards = Array.from(doc.querySelectorAll(".cPostCard")).filter((c) => !c.closest("[data-viewname^='DProfileStory'], [data-viewname='DProfileView'], [data-viewname='DProfileLayerView']"));
   for (const card of cards) documents.push(parsePostDetail(card));
+  // 인물 작성글·밴드 글 목록의 카드([DPostListItemView], .cPostCard 없음, 실제 저장 표본). 목록 카드는 본문이 줄여져 있거나
+  // 댓글이 빠져 있을 수 있어 '검토 필요'로 두고, 전문·댓글은 글을 열어야 확인된다고 알린다. 글 상세 카드가 있으면 목록은 읽지 않는다
+  if (!cards.length)
+    for (const item of Array.from(doc.querySelectorAll("[data-viewname='DPostListItemView']"))) {
+      if (item.closest(".cPostCard")) continue;
+      const pd = parsePostDetail(item);
+      pd.confidence = "review";
+      pd.evidence.unshift("글 목록의 카드에서 읽음(목록 카드)");
+      pd.issues.push({ kind: "unverified-structure", message: "글 목록 카드에서 읽은 글입니다. 본문 전체와 댓글은 글을 열어 저장해야 확인됩니다." });
+      documents.push(pd);
+    }
 
   const memberList = doc.querySelector("[data-viewname='DBandMemberCommentListView']");
   if (memberList && memberList.querySelector(".cCommentOnly")) documents.push(parseMemberComments(doc, memberList));

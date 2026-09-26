@@ -12,6 +12,7 @@ import { describeSelection } from "./selection";
 import { readArchive, type ArchiveReadResult } from "../../src/archive/reader";
 import { summarizeArchive, type ArchiveSummary } from "./archiveImport";
 import { computeOutcome, computeTotals, followUpText } from "./totals";
+import { applyFollowScreen, logFollow, type FollowOutcome } from "./follow";
 import { profileImages, profileSummary, type BandProfileRecord } from "../../src/importers/band/profile";
 import { renderProfileHtml } from "../../src/exporters/profileHtml";
 import { blobToDataUrl } from "../../src/exporters/html";
@@ -79,6 +80,99 @@ function Manager() {
     return () => clearInterval(t);
   }, [reload]);
 
+  // ---- 직접 열며 수집: 사용자 탭의 화면 바뀜 알림을 받아 한 번에 하나씩 읽는다 ----
+  const followRef = useRef<{ jobId: string; tabId: number; taskId: string; busy: boolean; again: boolean; last: string } | null>(null);
+  const followNotify = (tabId: number, on: boolean, text: string) => {
+    try {
+      void chrome.tabs.sendMessage(tabId, { type: "afterlog-follow-state", on, text }).catch(() => undefined);
+    } catch {
+      /* 탭이 닫힘 */
+    }
+  };
+  const followProcess = useCallback(async () => {
+    const f = followRef.current;
+    if (!f) return;
+    if (f.busy) {
+      f.again = true;
+      return;
+    }
+    f.busy = true;
+    try {
+      do {
+        f.again = false;
+        browserRef.current ??= new ChromeBrowser();
+        const at = new Date().toISOString();
+        let out: FollowOutcome;
+        try {
+          const read = await browserRef.current.readProfileScreen(f.tabId);
+          out = await applyFollowScreen(f.jobId, f.taskId, read, at);
+        } catch (e) {
+          out = { kind: "error", text: `화면을 읽지 못했습니다: ${(e as Error).message}`, images: [] };
+        }
+        await logFollow(f.jobId, out.kind, out.text, at);
+        f.last = out.text;
+        followNotify(f.tabId, true, out.text);
+        const job = await cdb().jobs.get(f.jobId);
+        if (out.images.length && job?.options.includeImages) {
+          const engine = new Engine({ browser: browserRef.current, onEvent: () => void reload() });
+          void engine.fetchAssets(out.images, f.taskId, new DiagRecorder(f.jobId, !!job.options.diagnostics)).then(() => reload());
+        }
+        await reload();
+      } while (f.again && followRef.current === f);
+    } finally {
+      f.busy = false;
+    }
+  }, [reload]);
+  const followStart = useCallback(
+    async (jobId: string) => {
+      const job = await cdb().jobs.get(jobId);
+      const task = await cdb().tasks.where("jobId").equals(jobId).first();
+      if (!job?.options.follow || !task) return;
+      if (followRef.current && followRef.current.jobId !== jobId) {
+        const prev = followRef.current;
+        await stopFollow(prev.jobId);
+        followNotify(prev.tabId, false, "");
+      }
+      await cdb().jobs.update(jobId, { status: "paused", pauseReason: null, finishedAt: null, options: { ...job.options, follow: { ...job.options.follow, active: true } } });
+      followRef.current = { jobId, tabId: job.options.follow.tabId, taskId: task.id, busy: false, again: false, last: "" };
+      followNotify(job.options.follow.tabId, true, "직접 열며 수집을 시작했습니다. 저장할 인물의 프로필·스토리·사진 화면을 여세요.");
+      await reload();
+      void followProcess();
+    },
+    [followProcess, reload],
+  );
+  const followStop = useCallback(async () => {
+    const f = followRef.current;
+    if (!f) return;
+    followRef.current = null;
+    await stopFollow(f.jobId);
+    followNotify(f.tabId, false, "직접 열며 수집을 멈췄습니다");
+    await reload();
+  }, [reload]);
+  useEffect(() => {
+    const onMsg = (msg: { type?: string }, sender: chrome.runtime.MessageSender, reply: (r: unknown) => void) => {
+      const f = followRef.current;
+      const tabId = sender.tab?.id;
+      if (!msg?.type?.startsWith("afterlog-follow-") || tabId === undefined) return;
+      if (msg.type === "afterlog-follow-query") {
+        if (f && f.tabId === tabId) reply({ on: true, text: f.last });
+        return;
+      }
+      if (!f || f.tabId !== tabId) return;
+      if (msg.type === "afterlog-follow-change") void followProcess();
+      if (msg.type === "afterlog-follow-stop") void followStop();
+    };
+    chrome.runtime.onMessage.addListener(onMsg);
+    return () => chrome.runtime.onMessage.removeListener(onMsg);
+  }, [followProcess, followStop]);
+  // 관리 창을 다시 열면 켜져 있던 직접 열며 수집을 이어서
+  useEffect(() => {
+    void (async () => {
+      const on = (await cdb().jobs.toArray()).find((j) => j.options.follow?.active);
+      if (on && !followRef.current) await followStart(on.id);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const start = useCallback(
     async (jobId: string) => {
       if (runningHere) return;
@@ -116,7 +210,7 @@ function Manager() {
     }
     const kind = params.get("new");
     if (kind === "form") history.replaceState(null, "", location.pathname);
-    if (kind !== "post" && kind !== "list" && kind !== "sel" && kind !== "search" && kind !== "popup") return;
+    if (kind !== "post" && kind !== "list" && kind !== "sel" && kind !== "search" && kind !== "popup" && kind !== "follow") return;
     autostarted.current = true;
     void (async () => {
       const created = await jobFromPage(kind, params.get("url") ?? "", Number(params.get("tabId")) || undefined, params.get("modes") ?? "");
@@ -129,7 +223,8 @@ function Manager() {
       setSel(created.id);
       setCreating(false);
       await reload();
-      void start(created.id);
+      if (kind === "follow") void followStart(created.id);
+      else void start(created.id);
     })();
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -241,6 +336,10 @@ function Manager() {
               onChanged={reload}
               setMessage={setMessage}
               engineForAssets={() => new Engine({ browser: (browserRef.current ??= new ChromeBrowser()), onEvent: () => void reload() })}
+              followActive={followRef.current?.jobId === job.id}
+              onFollowStart={() => void followStart(job.id)}
+              onFollowStop={() => void followStop()}
+              onFollowReadNow={() => void followProcess()}
             />
           )}
         </main>
@@ -250,7 +349,25 @@ function Manager() {
 }
 
 /** 밴드 화면의 저장 막대(content.js)가 연 요청을 작업으로 만든다. 주소는 밴드 주소만 받는다. 같은 작업이 진행 중이면 그 작업으로 연결한다(6절) */
-export async function jobFromPage(kind: "post" | "list" | "sel" | "search" | "popup", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+export async function jobFromPage(kind: "post" | "list" | "sel" | "search" | "popup" | "follow", rawUrl: string, tabId?: number, modes = ""): Promise<{ id: string } | { error: string }> {
+  if (kind === "follow") {
+    const u = parseBandUrl(rawUrl);
+    if (!u || tabId === undefined) return { error: "밴드 화면에서만 쓸 수 있습니다." };
+    // 같은 탭에서 켜져 있는 것이 있으면 그 작업으로
+    const same = (await cdb().jobs.toArray()).find((j) => j.options.follow?.tabId === tabId && j.status !== "finished");
+    if (same) return { id: same.id };
+    const job = await createJob({
+      scope: "profile",
+      label: "직접 열며 수집",
+      options: { ...DEFAULT_OPTIONS, skipCaptured: false, follow: { tabId, active: true, target: null, log: [] } },
+      bandNo: u.bandNo,
+      profiles: [{ url: rawUrl, tabId }],
+    });
+    // 자동 수집 과제로 돌지 않게(이 작업은 사용자가 연 화면을 따라 읽는다)
+    const t = await cdb().tasks.where("jobId").equals(job.id).first();
+    if (t) await cdb().tasks.update(t.id, { status: "skipped", errorCode: null, errorText: "직접 열며 수집: 아직 저장한 화면 없음" });
+    return { id: job.id };
+  }
   if (kind === "popup") {
     const u = parseBandUrl(rawUrl);
     if (!u || tabId === undefined) return { error: "밴드 화면의 프로필 팝업에서만 쓸 수 있습니다." };
@@ -639,6 +756,10 @@ function JobView({
   onChanged,
   setMessage,
   engineForAssets,
+  followActive,
+  onFollowStart,
+  onFollowStop,
+  onFollowReadNow,
 }: {
   job: Job;
   running: boolean;
@@ -648,6 +769,10 @@ function JobView({
   onChanged(): Promise<void>;
   setMessage(m: { kind: "ok" | "error"; text: string } | null): void;
   engineForAssets(): Engine;
+  followActive: boolean;
+  onFollowStart(): void;
+  onFollowStop(): void;
+  onFollowReadNow(): void;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [caps, setCaps] = useState<Capture[]>([]);
@@ -663,7 +788,9 @@ function JobView({
       setTasks(ts);
       setCaps(cs);
       setObs(await cdb().comments.where("jobId").equals(job.id).toArray());
-      const urls = [...new Set(cs.flatMap((c) => c.imageUrls))];
+      // 글 이미지 + 프로필·스토리·사진첩 이미지(자산 파일 수는 사진이 나온 횟수와 다르다)
+      const ps = await cdb().profiles.where("jobId").equals(job.id).toArray();
+      const urls = [...new Set([...cs.flatMap((c) => c.imageUrls), ...ps.flatMap((p) => [...p.imageUrls, ...(p.record ? profileImages(p.record).map((i) => i.src).filter((u) => /^https?:/.test(u)) : [])])])];
       const as = (await cdb().assets.bulkGet(urls)).filter(Boolean);
       setAssetStat({
         stored: as.filter((a) => a!.status === "stored").length,
@@ -801,6 +928,41 @@ function JobView({
         <p className="notice">확장이 v{job.lastRunVersion}에서 v{COLLECTOR_VERSION}로 업데이트됐습니다. 이어받으면 저장된 주소부터 새 버전으로 계속하며, 이미 모은 글은 그대로 둡니다.</p>
       ) : null}
 
+      {job.options.follow ? (
+        <section className="follow-panel" aria-label="직접 열며 수집">
+          <p>
+            <b>{followActive ? "직접 열며 수집 중" : "직접 열며 수집 멈춤"}</b>
+            {job.options.follow.target ? ` · 대상: ${job.options.follow.target.name ?? "이름 모름"}${job.options.follow.target.memberKey ? "" : "(인물 확인 전)"}` : " · 대상: 첫 화면의 인물"}
+          </p>
+          <p className="small muted">
+            이 관리 창을 연 채로, 밴드 탭에서 저장할 인물의 프로필·스토리(상세)·팝업·'사진' 탭을 직접 여세요. 화면이 바뀔 때마다 그대로 읽어 이 인물 아래에 보탭니다(누르거나 쓰지 않음). 다른 인물·밴드 화면은
+            저장하지 않고, 같은 내용은 다시 늘리지 않습니다. 글은 막대의 '이 글 저장'으로.
+          </p>
+          <div className="row">
+            {followActive ? (
+              <>
+                <button type="button" className="ui-btn" onClick={onFollowReadNow}>
+                  지금 화면 읽기
+                </button>
+                <button type="button" className="ui-btn" onClick={onFollowStop}>
+                  멈추기
+                </button>
+              </>
+            ) : (
+              <button type="button" className="ui-btn ui-btn-primary" onClick={onFollowStart}>
+                다시 따라가기
+              </button>
+            )}
+          </div>
+          <ol className="follow-log small">
+            {job.options.follow.log.map((l, i) => (
+              <li key={i} className={`fl-${l.kind}`}>
+                <time>{new Date(l.at).toLocaleTimeString()}</time> {l.text}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       <div className="totals" aria-label="수집 합계">
         <span>
           저장한 글 <b>{totals.posts.toLocaleString()}</b>개
@@ -851,15 +1013,18 @@ function JobView({
               <b>{done ? `스토리 ${t.result?.stories ?? 0}` : TASK_LABEL[t.status]}</b>
               <span>
                 {t.result?.title ?? "프로필"}
-                {done ? ` · 사진 ${t.result?.images ?? 0}장 · ` : " · "}
+                {done && t.result?.profileStatus ? <small className="muted"> · {t.result.profileStatus}</small> : null}
+                {done ? ` · 이미지 ${t.result?.images ?? 0}개 · ` : " · "}
                 {done ? (
                   <>
                     <button type="button" className="ui-link small" onClick={() => void openProfile(t.id, "data")}>
                       보관본 보기
                     </button>{" "}
-                    <button type="button" className="ui-link small" onClick={() => void openProfile(t.id, "snapshot")}>
-                      보관 당시 화면
-                    </button>
+                    {t.result?.hasSnapshot !== false ? (
+                      <button type="button" className="ui-link small" onClick={() => void openProfile(t.id, "snapshot")}>
+                        보관 당시 화면
+                      </button>
+                    ) : null}
                     {t.status === "partial" && t.errorText ? <small className="muted"> · {t.errorText}</small> : null}
                   </>
                 ) : (
@@ -1258,4 +1423,10 @@ function ArchiveView({ archive, onClose, onResume }: { archive: { r: ArchiveRead
       ) : null}
     </section>
   );
+}
+
+async function stopFollow(jobId: string) {
+  const job = await cdb().jobs.get(jobId);
+  if (!job?.options.follow) return;
+  await cdb().jobs.update(jobId, { status: "finished", finishedAt: new Date().toISOString(), options: { ...job.options, follow: { ...job.options.follow, active: false } } });
 }

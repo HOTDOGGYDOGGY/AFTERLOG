@@ -160,7 +160,7 @@ export async function analyzeFiles(files: File[], projectId: string | null, past
       for (const record of parseBandProfileDocument(new DOMParser().parseFromString(c.text, "text/html"), { pageUrl: savedFromUrl(c.text) ?? sourceUrl, observedAt: null }))
         profiles.push({ record, fileName: c.name });
   // 게시글이 있는 HTML을 우선(프로필 페이지와 글 페이지를 함께 넣은 경우)
-  const hasPost = (c: Candidate) => c.kind !== "band-plain-text" && /cPostCard|DBandMemberCommentListView/.test(c.text) && parseBandHtml(c.text).documents.length > 0;
+  const hasPost = (c: Candidate) => c.kind !== "band-plain-text" && /cPostCard|DBandMemberCommentListView|DPostListItemView/.test(c.text) && parseBandHtml(c.text).documents.length > 0;
   const postFirst = cands.findIndex(hasPost);
   if (postFirst > 0) cands.unshift(...cands.splice(postFirst, 1));
   if (!cands.length)

@@ -6,6 +6,7 @@ import { captureProfileInPage, type ProfileExtraction } from "./page/profile";
 import { captureProfilePopupInPage, type ProfilePopupExtraction } from "./page/profilePopup";
 import { resolvePopupMemberInPage, type PopupMemberResult } from "./page/popupMember";
 import { readMemberPhotosInPage, type MemberPhotosRead } from "./page/memberPhotos";
+import { readProfileScreenInPage, type ProfileScreenRead } from "./page/profileScreen";
 import { openCommentPostInPage, readMemberCommentsInPage, type MemberCommentsRound, type OpenCommentPostResult } from "./page/memberComments";
 import { extractPostInPage, type PostExtraction } from "./page/extractPost";
 import { discoverRoundInPage, type DiscoverRound } from "./page/discoverLinks";
@@ -192,6 +193,11 @@ export class ChromeBrowser implements CollectorBrowser {
   async readMemberPhotos(url: string) {
     const { tabId } = await this.navigate(url, "body");
     return this.exec<Parameters<typeof readMemberPhotosInPage>, MemberPhotosRead>(tabId, readMemberPhotosInPage, [{ waitMs: Math.max(1000, MIN_DELAY_MS), readyMs: LIMITS.pageTimeoutMs, maxRounds: 200 }]);
+  }
+
+  /** '직접 열며 수집': 사용자 탭의 지금 화면을 그대로 읽는다(누르거나 스크롤하지 않음) */
+  async readProfileScreen(tabId: number) {
+    return this.exec<[], ProfileScreenRead>(tabId, readProfileScreenInPage, []);
   }
 
   async captureProfilePopup(tabId: number) {

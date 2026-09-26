@@ -7,9 +7,9 @@ import { buildDocument } from "../../src/importers/band/build";
 import { BAND_HTML_PARSER_VERSION, imageRefFromSrc, parseBandHtml } from "../../src/importers/band/html";
 import { sha256Hex } from "../../src/storage/hash";
 import { COLLECTOR_VERSION } from "./config";
-import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type Task } from "./db";
+import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type StoredCollectorAsset, type Task } from "./db";
 import { describeSelection } from "./selection";
-import { BAND_PROFILE_SCHEMA, BAND_PROFILE_SOURCE_KIND, profileImages, type BandProfileRecord } from "../../src/importers/band/profile";
+import { BAND_PROFILE_SCHEMA, BAND_PROFILE_SOURCE_KIND, memberPhotosStatus, profileImages, storyStatus, type BandProfileRecord } from "../../src/importers/band/profile";
 import { renderProfileHtml } from "../../src/exporters/profileHtml";
 import { computeOutcome, computeTotals, totalsText } from "./totals";
 import { safeName } from "../../src/exporters/fileName";
@@ -26,9 +26,9 @@ const UNSUPPORTED = [
   "동영상·일반 파일 첨부 원본",
 ];
 
-export async function buildReport(job: Job, tasks: Task[], caps: Capture[], exportedAt: string, obs: CommentObservation[] = []): Promise<CaptureReport> {
+export async function buildReport(job: Job, tasks: Task[], caps: Capture[], exportedAt: string, obs: CommentObservation[] = [], assetSnap?: Map<string, StoredCollectorAsset>): Promise<CaptureReport> {
   const urls = new Set(caps.flatMap((c) => c.imageUrls));
-  const assets = (await cdb().assets.bulkGet([...urls])).filter(Boolean);
+  const assets = assetSnap ? [...urls].map((u) => assetSnap.get(u)).filter(Boolean) : (await cdb().assets.bulkGet([...urls])).filter(Boolean);
   const posts = tasks.filter((t) => t.kind === "post");
   const lists = tasks.filter((t) => t.kind === "list");
   const failed = posts.filter((t) => t.status === "failed").length;
@@ -99,12 +99,12 @@ export async function buildReport(job: Job, tasks: Task[], caps: Capture[], expo
 }
 
 /** 프로필 보관본을 혼자 열리는 HTML로(스타일·이미지 포함, 스크립트 없음) */
-export async function profileStandaloneHtml(p: ProfileCapture): Promise<string> {
+export async function profileStandaloneHtml(p: ProfileCapture, assetSnap?: Map<string, StoredCollectorAsset>): Promise<string> {
   const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
   let html = p.html;
   let css = p.css;
   for (const url of p.imageUrls) {
-    const a = await cdb().assets.get(url);
+    const a = assetSnap ? assetSnap.get(url) : await cdb().assets.get(url);
     if (!a || a.status !== "stored" || !a.blob) continue;
     const buf = new Uint8Array(await a.blob.arrayBuffer());
     let bin = "";
@@ -215,7 +215,8 @@ export async function exportJobHtml(jobId: string, appTheme: "light" | "dark" = 
     .map((f) => {
       const r = f.p.record;
       const snap = profileFiles.find((g) => g.kind === "snapshot" && g.p.id === f.p.id && g !== f);
-      const stories = r ? (r.stories.state === "collected" ? `스토리 ${r.stories.items.length}개 · 스토리 댓글 ${r.stories.items.reduce((n, x) => n + x.comments.length, 0)}개` : "스토리 수집 안 함·확인 못 함") : `스토리 ${f.p.stories.length}개(보관 화면 기준)`;
+      // 상세 HTML과 같은 상태 계산(명세 6.3: 목차와 상세가 어긋나지 않게)
+      const stories = r ? `${storyStatus(r).text}${r.stories.items.length ? ` · 스토리 댓글 ${r.stories.items.reduce((n, x) => n + x.comments.length, 0)}개` : ""}${r.memberPhotos && r.memberPhotos.state !== "notCollected" ? ` · ${memberPhotosStatus(r).text}` : ""}` : `보관 화면만(구조 미해석)`;
       const url = r?.profileUrl ?? f.p.url;
       return `<li><a href="${encodeURI(f.name)}">${escapeHtml(r?.name ?? f.p.name ?? "인물")} 프로필</a> · ${stories}${snap ? ` · <a href="${encodeURI(snap.name)}">보관 당시 화면</a>` : ""} · <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${r?.profileUrl ? "밴드에서 열기 ↗" : "원래 화면 열기 ↗"}</a>${r?.identity === "unconfirmed" ? " <small>(인물 연결 미확인)</small>" : ""}</li>`;
     });
@@ -241,12 +242,33 @@ ${rows.join("\n")}
 
 /** .afterlog와 HTML 저장이 함께 쓰는 문서 만들기(지금 저장된 것만 읽어 일관된 시점으로) */
 async function buildJobDocuments(jobId: string) {
-  const job = await cdb().jobs.get(jobId);
+  // 내보내기 시작 시점의 일관된 스냅숏(명세 S05): 수집 중에 자료가 더해져도 목차·상세·보고서가 같은 시점을 본다.
+  // IndexedDB 읽기 트랜잭션 하나에서 필요한 것을 모두 읽고, 이후에는 DB를 다시 읽지 않는다
+  interface JobSnapshot {
+    job: Job | undefined;
+    tasks: Task[];
+    caps: Capture[];
+    obs: CommentObservation[];
+    profiles: ProfileCapture[];
+    assets: Map<string, StoredCollectorAsset>;
+  }
+  const db = cdb();
+  const snap: JobSnapshot = await db.transaction("r", [db.jobs, db.tasks, db.captures, db.comments, db.profiles, db.assets], async (): Promise<JobSnapshot> => {
+    const sJob = await db.jobs.get(jobId);
+    const sTasks: Task[] = await db.tasks.where("jobId").equals(jobId).sortBy("order");
+    const sCaps: Capture[] = await db.captures.where("jobId").equals(jobId).toArray();
+    const sObs: CommentObservation[] = await db.comments.where("jobId").equals(jobId).toArray();
+    const sProfiles: ProfileCapture[] = await db.profiles.where("jobId").equals(jobId).toArray();
+    const urls = new Set([...sCaps.flatMap((c) => c.imageUrls), ...sProfiles.flatMap((p) => [...p.imageUrls, ...(p.record ? profileImages(p.record).map((i) => i.src) : [])])]);
+    const list = await db.assets.bulkGet([...urls]);
+    return { job: sJob, tasks: sTasks, caps: sCaps, obs: sObs, profiles: sProfiles, assets: new Map(list.filter((x): x is StoredCollectorAsset => !!x).map((x) => [x.url, x])) };
+  });
+  const job = snap.job;
   if (!job) throw new Error("작업이 없습니다.");
   // 수집 중에도 일관된 시점으로(명세 11.3): 지금 저장된 것만 읽어서 만든다
-  const tasks = await cdb().tasks.where("jobId").equals(jobId).sortBy("order");
+  const tasks = snap.tasks;
   // 선택 수집에서 기간 밖이라 뺀 저장본은 넣지 않는다
-  const caps = (await cdb().captures.where("jobId").equals(jobId).toArray()).filter((c) => !c.excluded);
+  const caps = snap.caps.filter((c) => !c.excluded);
   const orderOf = new Map(tasks.map((t) => [t.id, t.order]));
   caps.sort((a, b) => (orderOf.get(a.taskId) ?? 0) - (orderOf.get(b.taskId) ?? 0));
   const exportedAt = new Date().toISOString();
@@ -256,7 +278,7 @@ async function buildJobDocuments(jobId: string) {
   const bySha = new Map<string, ArchiveAsset>();
   const urlToAsset = new Map<string, string>();
   for (const url of new Set(caps.flatMap((c) => c.imageUrls))) {
-    const a = await cdb().assets.get(url);
+    const a = snap.assets.get(url);
     if (!a || a.status !== "stored" || !a.blob || !a.sha256) continue;
     let asset = bySha.get(a.sha256);
     if (!asset) {
@@ -308,7 +330,7 @@ async function buildJobDocuments(jobId: string) {
   }
 
   // 인물의 댓글만(B): 인물마다 댓글 모음 문서 하나. 목록이 보여 준 그대로(원글은 목록의 발췌만)이며 다른 사람의 글·댓글 전문은 넣지 않는다(F05)
-  const obs = await cdb().comments.where("jobId").equals(jobId).toArray();
+  const obs = snap.obs;
   if (job.options.selection?.commentsOnly) {
     for (const t of tasks.filter((x) => x.kind === "comments")) {
       // 교집합(AND)이면 조건을 만족한(결과에 든) 원글에 연결된 댓글만(4.3)
@@ -349,10 +371,10 @@ async function buildJobDocuments(jobId: string) {
   }
 
   // 인물 프로필: 구조 자료(JSON, 앱·확장이 같은 해석기 형식) + 보관 당시 화면(혼자 열리는 HTML)
-  const profiles = await cdb().profiles.where("jobId").equals(jobId).toArray();
+  const profiles = snap.profiles;
   const profileFiles: { name: string; html: string; p: ProfileCapture; kind: "data" | "snapshot" }[] = [];
   const addAsset = async (url: string): Promise<{ id: string; data: Blob; mime: string; sha256: string } | null> => {
-    const a = await cdb().assets.get(url);
+    const a = snap.assets.get(url);
     if (!a || a.status !== "stored" || !a.blob || !a.sha256) return null;
     let asset = bySha.get(a.sha256);
     if (!asset) {
@@ -366,7 +388,7 @@ async function buildJobDocuments(jobId: string) {
     const base = `프로필_${safeName(p.name ?? p.record?.name ?? (p.memberKey || "인물")).slice(0, 40)}`;
     let snapshotName: string | null = null;
     if (p.surface !== "profilePopup" && p.html) {
-      const html = await profileStandaloneHtml(p);
+      const html = await profileStandaloneHtml(p, snap.assets);
       const bytes = new TextEncoder().encode(html);
       snapshotName = `${base}_보관화면.html`;
       profileFiles.push({ name: snapshotName, html, p, kind: "snapshot" });
@@ -411,7 +433,7 @@ async function buildJobDocuments(jobId: string) {
       kind: "data",
     });
   }
-  const report = await buildReport(job, tasks, caps, exportedAt, obs);
+  const report = await buildReport(job, tasks, caps, exportedAt, obs, snap.assets);
   if (profiles.length)
     report.profiles = profiles.map((p) => ({ name: p.record?.name ?? p.name, url: p.record?.profileUrl ?? p.url, stories: p.record ? p.record.stories.items.length : p.stories.length, images: p.imageUrls.length, capturedAt: p.capturedAt }));
   return { job, documents, assets: [...bySha.values()], sources, report, projectId, exportedAt, docUrls, profileFiles };

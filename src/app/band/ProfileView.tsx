@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { DocumentData, SourceImport } from "../../domain/types";
 import { BAND_PROFILE_SOURCE_KIND, isBandProfileRecord, type BandImageRef, type BandProfileComment, type BandProfileRecord } from "../../importers/band/profile";
 import { blocksToPlainText } from "../../importers/band/html";
-import { COMMENT_STATE_TEXT, PHOTO_STATE_TEXT, STORY_STATE_TEXT, shownText } from "../../exporters/profileHtml";
+import { COMMENT_STATE_TEXT, shownText } from "../../exporters/profileHtml";
+import { memberPhotosStatus, photoHistoryStatus, storyStatus, type SectionStatus } from "../../importers/band/profile";
 import { listSources } from "../../storage/repo";
 import { downloadBlob } from "../download";
 
@@ -118,7 +119,7 @@ export function ProfileView({
           ["profile", "프로필"],
           ["photos", "사진 이력"],
           ["stories", `스토리 ${r.stories.items.length}`],
-          ["memberPhotos", `작성 사진${r.memberPhotos?.items.length ? ` ${r.memberPhotos.items.length}` : ""}`],
+          ["memberPhotos", `사진첩${r.memberPhotos?.items.length ? ` ${r.memberPhotos.items.length}` : ""}`],
         ] as [Tab, string][])
       : []),
     ["posts", `작성글 ${mine.posts.length}`],
@@ -228,15 +229,10 @@ export function ProfileView({
             ))}
           </>
         ) : null}
-        {tab === "photos" && r ? <p className="muted">{PHOTO_STATE_TEXT[r.photoHistory.state] || `사진 ${r.photoHistory.items.length}장`}</p> : null}
+        {tab === "photos" && r ? <StatusLine st={photoHistoryStatus(r)} /> : null}
         {tab === "stories" && r ? (
           <>
-            {STORY_STATE_TEXT[r.stories.state] ? (
-              <p className="muted">
-                {STORY_STATE_TEXT[r.stories.state]}
-                {r.storyCountShown ? `(표시 ${r.storyCountShown}개)` : ""}
-              </p>
-            ) : null}
+            <StatusLine st={storyStatus(r)} />
             {r.stories.items.map((s) => {
               const top = s.comments.filter((c) => !c.parentKey || !s.comments.some((x) => x.key === c.parentKey));
               return (
@@ -264,15 +260,12 @@ export function ProfileView({
           </>
         ) : null}
         {tab === "memberPhotos" && r ? (
-          !r.memberPhotos || r.memberPhotos.state === "notCollected" ? (
-            <p className="muted">작성 사진 수집 안 함</p>
-          ) : r.memberPhotos.state === "none" ? (
-            <p className="muted">작성 사진 0장 확인</p>
-          ) : r.memberPhotos.state === "unrecognized" ? (
-            <p className="muted">작성 사진 확인 못 함(구조 미인식 또는 표시되지 않음)</p>
+          !r.memberPhotos || r.memberPhotos.state !== "collected" ? (
+            <StatusLine st={memberPhotosStatus(r)} />
           ) : (
             <>
-              <p className="small muted">이 인물 화면의 '사진' 탭에 있던 사진입니다(원본을 받지 못한 것은 축소본).</p>
+              <StatusLine st={memberPhotosStatus(r)} />
+              <p className="small muted">이 인물 화면의 '사진' 탭에 있던 사진입니다(프로필 사진 이력과 다른 범주). 누르면 크게 봅니다.</p>
               <div className="pv-grid">
                 {r.memberPhotos.items.map((p, i) => {
                   const full = p.image.sha256 ? assetIdBySha(p.image.sha256) : undefined;
@@ -362,4 +355,9 @@ export function ProfilePanel({
       <ProfileView entry={cur} assetUrl={assetUrl} assetIdBySha={assetIdBySha} docs={docs} onOpenDoc={onOpenDoc} />
     </section>
   );
+}
+
+/** 상태 한 줄(HTML 목차·상세·확장과 같은 계산) */
+function StatusLine({ st }: { st: SectionStatus }) {
+  return <p className={st.tone === "warn" ? "pv-warn small" : "muted small"}>{st.text}</p>;
 }

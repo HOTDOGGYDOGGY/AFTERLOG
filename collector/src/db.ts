@@ -19,7 +19,17 @@ export interface JobOptions {
   diagnostics: boolean;
   /** 선택 수집(선택 수집 명세 v1.0). 없으면 예전처럼 주소·목록 전체 */
   selection?: Selection | null;
+  /** '직접 열며 수집': 따라갈 사용자 탭과 대상 인물(첫 화면에서 정함), 최근 기록 */
+  follow?: FollowState | null;
 }
+
+export interface FollowState {
+  tabId: number;
+  active: boolean;
+  target: { bandNo: string | null; memberKey: string | null; name: string | null } | null;
+  log: { at: string; text: string; kind: FollowKind }[];
+}
+export type FollowKind = "saved" | "same" | "outOfScope" | "notProfile" | "post" | "login" | "error";
 
 /** 선택 인물. 밴드 ID + 멤버 식별자로 구분한다(이름은 표시·찾기용, 3.3) */
 export interface SelectedMember {
@@ -165,8 +175,11 @@ export interface Task {
     userVerified?: boolean;
     /** 이전 저장본 재사용(이번에 다시 열지 않음) */
     reused?: boolean;
-    /** 프로필: 스토리 수 · 이미지 수 */
+    /** 프로필: 스토리 수 · 이미지 수 · 상태 한 줄(앱·HTML과 같은 계산) */
     stories?: number;
+    profileStatus?: string;
+    /** 보관 당시 화면(스냅숏)이 있는가 */
+    hasSnapshot?: boolean;
     images?: number;
     /** 선택 수집 판정: 맞은 조건 · 검색어 일치 위치 */
     confirmed?: SelectReason[];

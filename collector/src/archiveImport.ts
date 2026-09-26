@@ -3,7 +3,7 @@
 import type { ArchiveReadResult } from "../../src/archive/reader";
 import { isCaptureReport } from "../../src/archive/captureReport";
 import type { DocumentData } from "../../src/domain/types";
-import { isBandProfileRecord, type BandProfileRecord } from "../../src/importers/band/profile";
+import { isBandProfileRecord, profileNeedsMore, type BandProfileRecord } from "../../src/importers/band/profile";
 import { parseBandUrl, postKey } from "./urls";
 
 export interface ArchiveSummary {
@@ -38,7 +38,7 @@ export function summarizeArchive(r: ArchiveReadResult): ArchiveSummary {
     try {
       const rec = JSON.parse(dec.decode(bytes));
       if (!isBandProfileRecord(rec)) continue;
-      const needsMore = rec.stories.state === "notCollected" || rec.stories.state === "unrecognized" || rec.stories.items.some((x) => x.commentsState === "partial" || x.textSource === "list");
+      const needsMore = profileNeedsMore(rec);
       profiles.push({ record: rec, needsMore });
     } catch {
       /* 읽지 못한 자료는 건너뜀 */

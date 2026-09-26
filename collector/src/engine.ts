@@ -2,7 +2,7 @@
 // 상태는 전부 DB에 두고(메모리에 작업을 들고 있지 않음), 한 과제의 결과와 완료 표시는 한 트랜잭션에서 확정한다.
 // 창이 닫히거나 확장이 업데이트되어도 점유(lease)가 끝난 과제는 다시 대기열로 돌아가 이어받는다.
 import { imageRefFromSrc, parseBandHtml, type ParsedDocument } from "../../src/importers/band/html";
-import { bandOriginalImage, bandProfileUrl, mergeProfileRecords, parseBandProfileDocument, profileImages, type BandProfileRecord } from "../../src/importers/band/profile";
+import { bandProfileUrl, memberPhotosStatus, mergeProfileRecords, photoHistoryStatus, storyStatus, parseBandProfileDocument, profileImages, type BandProfileRecord } from "../../src/importers/band/profile";
 import type { ProfileExtraction } from "./page/profile";
 import { COLLECTOR_VERSION, LIMITS, MIN_DELAY_MS } from "./config";
 import { cdb, type Capture, type CommentObservation, type Job, type ProfileCapture, type SelectReason, type Selection, type Task } from "./db";
@@ -828,12 +828,10 @@ export class Engine {
       const pr = await br.readMemberPhotos(`${m.origin}/band/${m.bandNo}/member/${m.memberKey}/photo`).catch(() => null);
       if (pr?.reason === "login") return loginStop;
       if (pr?.ok) {
-        const items = pr.srcs.map((src) => {
-          const orig = bandOriginalImage(src);
-          return { image: { src: orig, ref: imageRefFromSrc(orig) ?? null }, thumb: orig !== src ? { src, ref: imageRefFromSrc(src) ?? null } : null };
-        });
-        photos = { state: items.length ? "collected" : pr.empty ? "none" : "unrecognized", items };
-        photoUrls = items.flatMap((x) => [x.image.src, ...(x.thumb ? [x.thumb.src] : [])]);
+        // 화면에 보인 주소 그대로(크기 매개변수를 지워 원본이라고 만들지 않음, 명세 5.1)
+        const items = pr.srcs.map((src, i) => ({ image: { src, ref: imageRefFromSrc(src) ?? null }, thumb: null, order: i, quality: "list" as const }));
+        photos = { state: items.length ? "collected" : pr.empty ? "none" : "unrecognized", items, end: "noProgress" };
+        photoUrls = items.map((x) => x.image.src);
         await diag.event(task.id, { stage: "profile", state: "ok", count: countBucket(items.length) });
       } else {
         photos = { state: "unrecognized", items: [] };
@@ -851,8 +849,8 @@ export class Engine {
     }
     if (record && photos) record.memberPhotos = photos;
     // 팝업은 스토리가 있다고 했는데 프로필 화면은 없다고 할 때: 성공으로 넘기지 않고 알린다(원인 미확인)
-    if (popup?.storyCountShown && record && record.stories.items.length === 0 && page)
-      partialWhy.push(`팝업에는 스토리 ${popup.storyCountShown}개로 표시됐지만 프로필 화면에는 스토리가 없다고 나옴(공개 범위·삭제 등 원인 미확인)`);
+    // 스토리 상태는 공통 계산으로(표시 수·발견·상세·빈 안내 충돌). 보완이 필요하면 '일부'
+    if (record && page && storyStatus(record).needsMore && !partialWhy.some((w) => /스토리/.test(w))) partialWhy.push(storyStatus(record).text);
     if (page) {
       const sd = page.ex.storyDetails;
       if (!page.record) partialWhy.push("프로필 화면 구조를 알아보지 못해 보관 화면만 저장(스토리 전문·댓글 없음)");
@@ -908,7 +906,14 @@ export class Engine {
         leaseUntil: 0,
         errorCode: partialWhy.length ? "profilePartial" : null,
         errorText: partialWhy.length ? partialWhy.join(" · ") : null,
-        result: { title: `프로필${cap.name ? ` · ${cap.name}` : ""}`, stories: storyCount, images: queue.length, memberName: cap.name },
+        result: {
+          title: `프로필${cap.name ? ` · ${cap.name}` : ""}`,
+          stories: storyCount,
+          images: queue.length,
+          memberName: cap.name,
+          profileStatus: record ? [storyStatus(record).text, memberPhotosStatus(record).text, photoHistoryStatus(record).text].join(" · ") : "보관 화면만(구조 미해석)",
+          hasSnapshot: !!ex?.html,
+        },
       });
     });
     if (cap.name && cap.memberKey) await this.learnMemberName(job.id, cap.memberKey, cap.name);
@@ -1188,7 +1193,8 @@ export class Engine {
   /** 실패한 첨부만 다시 */
   async retryFailedAssets(jobId: string) {
     const caps = await cdb().captures.where("jobId").equals(jobId).toArray();
-    const urls = new Set(caps.flatMap((c) => c.imageUrls));
+    const profs = await cdb().profiles.where("jobId").equals(jobId).toArray();
+    const urls = new Set([...caps.flatMap((c) => c.imageUrls), ...profs.flatMap((p) => [...p.imageUrls, ...(p.record ? profileImages(p.record).map((i) => i.src) : [])])]);
     const failed = (await cdb().assets.where("status").equals("failed").toArray()).filter((a) => urls.has(a.url)).map((a) => a.url);
     const job = await cdb().jobs.get(jobId);
     await this.fetchAssets(failed, null, new DiagRecorder(jobId, !!job?.options.diagnostics));

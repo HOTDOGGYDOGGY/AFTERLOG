@@ -24,6 +24,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     q.set("new", "popup");
     q.set("tabId", String(sender.tab.id));
     q.set("url", sender.tab.url || "");
+  } else if (msg.act === "follow") {
+    // 직접 열며 수집: 이 탭에서 사용자가 여는 화면을 따라 읽는다
+    q.set("new", "follow");
+    q.set("tabId", String(sender.tab.id));
+    q.set("url", sender.tab.url || "");
   } else if (msg.act === "search") {
     // 사용자가 연 검색 결과(주소를 그대로 넘긴다)
     q.set("new", "search");

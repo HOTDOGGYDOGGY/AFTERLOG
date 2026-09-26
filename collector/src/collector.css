@@ -467,3 +467,29 @@ select {
 .search-row input {
   min-width: 0;
 }
+.follow-panel {
+  border: 1px solid var(--line, #ddd);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.follow-log {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+}
+.follow-log li {
+  padding: 2px 0;
+}
+.follow-log .fl-outOfScope,
+.follow-log .fl-error,
+.follow-log .fl-login {
+  color: #d97706;
+}
+.follow-log .fl-same,
+.follow-log .fl-notProfile,
+.follow-log .fl-post {
+  opacity: 0.7;
+}

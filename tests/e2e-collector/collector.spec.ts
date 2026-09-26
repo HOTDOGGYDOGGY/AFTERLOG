@@ -411,7 +411,7 @@ test("인물 프로필 저장: 스토리 상세를 열어 전문·댓글(이전 
   await expect(view.locator("#story-2 .comments > li")).toHaveCount(18);
   await expect(view.locator("#story-2 .counts")).toContainText("이 스토리의 표정 4 · 댓글 18");
   await expect(view.locator("#profile")).toContainText("프로필 표정");
-  await expect(view.locator("#photos")).toContainText("사진 이력 확인 못 함");
+  await expect(view.locator("#photos")).toContainText("프로필 사진 이력 구조 미확인(현재 사진만 저장)");
   // 인물 화면 '사진' 탭: 스크롤로 더 불러온 것까지 6장, 사진을 누르지 않음
   await expect(view.locator("#member-photos .g-img")).toHaveCount(6);
   expect(await view.locator(".face").getAttribute("src")).toMatch(/^data:image\//);
@@ -499,6 +499,51 @@ test("주소가 그대로인 프로필 팝업: 기본 정보를 읽고 '스토�
   await expect(tile).not.toContainText("원인 미확인");
   await expect(band).toHaveURL(`${BAND}/member`);
   expect(await band.evaluate(() => (window as unknown as { __traps(): number }).__traps())).toBe(0);
+  await mgr.close();
+  await band.close();
+});
+
+test("직접 열며 수집: 사용자가 연 팝업·프로필·스토리를 한 인물에 누적, 다른 인물은 범위 밖, 쓰기 버튼 누르지 않음", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/member`);
+  const bar = band.locator("#afterlog-collector-bar");
+  const mgrPromise = ctx.waitForEvent("page");
+  await bar.getByRole("button", { name: "직접 열며 수집" }).click();
+  const mgr = await mgrPromise;
+  await mgr.waitForLoadState();
+  const panel = mgr.locator(".follow-panel");
+  await expect(panel).toContainText("직접 열며 수집 중", { timeout: 15_000 });
+  await expect(bar.getByRole("button", { name: /직접 열며 수집 중/ })).toBeVisible({ timeout: 10_000 });
+
+  // 1) 팝업을 연다 → 기본 정보 저장
+  await band.getByRole("button", { name: "다온" }).click();
+  await expect(panel.locator(".follow-log")).toContainText("저장: 다온", { timeout: 15_000 });
+  // 2) 사용자가 '스토리 보기'를 눌러 프로필 화면으로 → 스토리가 늦게 떠도 따라 읽음
+  await band.locator("a._storyAnchor").click();
+  await band.waitForURL(/\/member\/MKDAON\/profile$/);
+  await expect(panel.locator(".follow-log")).toContainText("스토리 +2", { timeout: 20_000 });
+  // 3) 스토리 하나를 열면 전문과 보이는 댓글을 보탬
+  await band.locator("a.storyDetailLink").nth(1).click();
+  await expect(panel.locator(".follow-log")).toContainText("댓글 +10", { timeout: 20_000 });
+  expect(await band.evaluate(() => (window as unknown as { __traps: number }).__traps)).toBe(0);
+  // 4) 다른 인물(나래)의 팝업은 저장하지 않는다
+  await band.goto(`${BAND}/member`);
+  await expect(bar.getByRole("button", { name: /직접 열며 수집 중/ })).toBeVisible({ timeout: 10_000 });
+  await band.getByRole("button", { name: "나래" }).click();
+  await expect(panel.locator(".follow-log")).toContainText("범위 밖", { timeout: 15_000 });
+  await expect(bar).toContainText("범위 밖");
+  // 결과: 한 인물(다온), 스토리 2(상세 1), 댓글 10
+  const tile = mgr.locator(".stat.wide", { hasText: "프로필" });
+  await expect(tile).toContainText("다온");
+  await expect(tile.locator("b")).toHaveText("스토리 2");
+  await mgr.screenshot({ path: `${OUT}/13-follow-mode.png`, fullPage: true });
+  // 5) 막대에서 멈추기
+  await bar.getByRole("button", { name: /멈추기/ }).click();
+  await expect(panel).toContainText("직접 열며 수집 멈춤", { timeout: 10_000 });
+  // 저장: 글 0개여도 프로필만으로 .afterlog
+  const dl = mgr.waitForEvent("download");
+  await mgr.getByRole("button", { name: /\.afterlog로 저장/ }).click();
+  await (await dl).saveAs(resolve(OUT, "follow.afterlog"));
   await mgr.close();
   await band.close();
 });

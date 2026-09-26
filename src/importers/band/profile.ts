@@ -55,6 +55,18 @@ export interface BandProfileStory {
   commentsState: "complete" | "partial" | "none" | "notCollected";
 }
 
+export interface StoryObservation {
+  at: string | null;
+  surface: "profilePopup" | "profilePage";
+  /** 화면에 표시된 스토리 수(팝업의 '전체글 N'). 없으면 null */
+  shown: number | null;
+  /** 목록에서 찾은 고유 스토리 수 · 상세를 연 수 */
+  found: number;
+  detailed: number;
+  /** 밴드가 '스토리가 없다'는 빈 안내를 보였는가 */
+  emptyShown: boolean;
+}
+
 export interface BandProfileBasics {
   observedAt: string | null;
   name: string | null;
@@ -85,9 +97,22 @@ export interface BandProfileRecord extends BandProfileBasics {
   storyCountShown: number | null;
   /** 사진 이력: 실제 화면 표본이 없어 '확인 못 함' */
   photoHistory: { state: "unrecognized" | "none" | "collected"; items: { image: BandImageRef; timeText: string | null }[] };
-  stories: { state: "collected" | "none" | "notCollected" | "unrecognized"; items: BandProfileStory[] };
-  /** 인물 화면 '사진' 탭(이 인물이 올린 사진). 원본 주소와 목록의 축소본 */
-  memberPhotos?: { state: "collected" | "none" | "notCollected" | "unrecognized"; items: { image: BandImageRef; thumb: BandImageRef | null }[] };
+  stories: {
+    state: "collected" | "none" | "notCollected" | "unrecognized";
+    items: BandProfileStory[];
+    /** 스토리 수 관측(화면마다 따로 보존. 팝업 '표시 1'과 프로필 화면 '스토리 없음'이 어긋나도 둘 다 남긴다) */
+    observations?: StoryObservation[];
+  };
+  /**
+   * 사진첩: 인물 화면 '사진' 탭에 노출된 사진(이 인물이 올린 사진). 프로필 사진 이력과 다른 범주.
+   * image는 화면에 보인 주소 그대로(크기 매개변수를 지워 원본이라고 만들지 않음). thumb는 예전 파일 호환용
+   */
+  memberPhotos?: {
+    state: "collected" | "none" | "notCollected" | "unrecognized";
+    items: { image: BandImageRef; thumb: BandImageRef | null; order?: number; quality?: "list" | "detail" }[];
+    /** 목록 끝: 더 불러와지지 않을 때까지 스크롤(noProgress) · 저장 페이지라 확인 못 함(notChecked) */
+    end?: "noProgress" | "notChecked";
+  };
   /** 앞선 관측(합치기에서 기본 정보가 바뀌면 여기 남긴다) */
   history?: BandProfileBasics[];
   notes: string[];
@@ -162,7 +187,6 @@ export function parseBandMemberAnyPath(url: string | null | undefined): { bandNo
 }
 
 /** 밴드 사진 주소의 원본(목록은 ?type=… 축소본) */
-export const bandOriginalImage = (src: string) => (/^https?:\/\/[^/]*pstatic\.net\//.test(src) ? src.replace(/\?type=[^&#]*(&|$)/, (_m, amp) => (amp ? "?" : "")).replace(/\?$/, "") : src);
 
 export const bandProfileUrl = (bandNo: string, memberKey: string) => `https://www.band.us/band/${bandNo}/member/${encodeURIComponent(memberKey)}/profile`;
 /** 같은 인물 판정 키(P02: 이름이 같아도 식별자가 다르면 다른 인물) */
@@ -369,7 +393,11 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       commentsShown: num(card.querySelector(".reactionBox ._commentCountSpan")),
       storyCountShown: null,
       photoHistory: { state: "unrecognized", items: [] },
-      stories: { state: !listEl ? "unrecognized" : stories.length ? "collected" : "none", items: stories },
+      stories: {
+        state: !listEl ? "unrecognized" : stories.length ? "collected" : "none",
+        items: stories,
+        observations: listEl ? [{ at: observedAt, surface: "profilePage", shown: null, found: stories.length, detailed: stories.filter((x) => x.textSource === "detail").length, emptyShown }] : [],
+      },
       notes,
     });
   }
@@ -385,7 +413,7 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       ? Array.from(photoList.querySelectorAll("[data-viewname='DBandMemberPhotoListItemView'] img"))
           .map((i) => i.getAttribute("src"))
           .filter((x): x is string => !!x && !x.startsWith("data:"))
-          .map((src) => ({ image: img(bandOriginalImage(src))!, thumb: bandOriginalImage(src) !== src ? img(src) : null }))
+          .map((src, i) => ({ image: img(src)!, thumb: null, order: i, quality: "list" as const }))
       : [];
     out.push({
       schema: BAND_PROFILE_SCHEMA,
@@ -408,7 +436,7 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       storyCountShown: null,
       photoHistory: { state: "unrecognized", items: [] },
       stories: { state: "notCollected", items: [] },
-      memberPhotos: { state: items.length ? "collected" : "none", items },
+      memberPhotos: { state: items.length ? "collected" : "none", items, end: "notChecked" },
       notes: [],
     });
   }
@@ -446,7 +474,11 @@ export function parseBandProfileDocument(doc: Document | Element, opts: { pageUr
       photoHistory: { state: "unrecognized", items: [] },
       // 스토리 수가 표시되지 않거나 0이면 팝업이 보여 준 스토리는 없다(표본: 스토리 없는 인물은 '스토리 보기' 칸이 비어 있음)
       // 스토리 수가 0이면 없음. 수가 비어 있고 '스토리 보기'도 없으면 0이라고 단정하지 않는다(확인 못 함)
-      stories: { state: storyCountShown === 0 ? "none" : storyCountShown === null && !layer.querySelector("a._storyAnchor") ? "unrecognized" : "notCollected", items: [] },
+      stories: {
+        state: storyCountShown === 0 ? "none" : storyCountShown === null && !layer.querySelector("a._storyAnchor") ? "unrecognized" : "notCollected",
+        items: [],
+        observations: storyCountShown !== null ? [{ at: observedAt, surface: "profilePopup", shown: storyCountShown, found: 0, detailed: 0, emptyShown: false }] : [],
+      },
       notes: fromUrl ? (parseBandMemberPath(pageUrl) ? [] : ["인물 화면 위에 뜬 팝업이고 이름이 화면 머리글과 같아 그 인물로 연결했습니다."]) : ["주소가 바뀌지 않는 팝업이라 원본 인물 연결 미확인으로 보관했습니다. 같은 이름의 다른 인물과 합치지 않습니다."],
     });
   }
@@ -467,13 +499,74 @@ export function isBandProfileRecord(x: unknown): x is BandProfileRecord {
   return !!x && typeof x === "object" && (x as { schema?: unknown }).schema === BAND_PROFILE_SCHEMA;
 }
 
-/** 프로필 요약(목록·알림용) */
-export function profileSummary(r: BandProfileRecord): string {
-  const s = r.stories;
-  const story = s.state === "collected" ? `스토리 ${s.items.length}개` : s.state === "none" ? "스토리 0개 확인" : s.state === "notCollected" ? `스토리 수집 안 함${r.storyCountShown ? `(표시 ${r.storyCountShown}개)` : ""}` : "스토리 확인 못 함";
-  const photos = r.memberPhotos?.state === "collected" ? ` · 작성 사진 ${r.memberPhotos.items.length}장` : "";
-  return `${r.name ?? "이름 확인 못 함"} · ${story}${photos}${r.identity === "unconfirmed" ? " · 인물 연결 미확인" : ""}`;
+// ---------- 상태 계산(앱 화면·확장 관리 화면·HTML 목차·상세·보고서가 함께 쓴다, 명세 6.3) ----------
+
+export interface SectionStatus {
+  text: string;
+  /** ok 확보 · muted 확인된 없음/범위 밖 · warn 보완 필요·충돌·미확인 */
+  tone: "ok" | "muted" | "warn";
+  needsMore: boolean;
 }
+
+/** 예전 파일(관측 기록 없음)은 남아 있는 정보로 관측을 복원한다 */
+function storyObservations(r: BandProfileRecord): StoryObservation[] {
+  if (r.stories.observations) return r.stories.observations;
+  const out: StoryObservation[] = [];
+  if (r.storyCountShown !== null) out.push({ at: r.observedAt, surface: "profilePopup", shown: r.storyCountShown, found: 0, detailed: 0, emptyShown: false });
+  if (r.surface === "profilePage" && r.stories.state !== "unrecognized")
+    out.push({ at: r.observedAt, surface: "profilePage", shown: null, found: r.stories.items.length, detailed: r.stories.items.filter((x) => x.textSource === "detail").length, emptyShown: r.notes.some((n) => /스토리가 없다고 표시/.test(n)) });
+  return out;
+}
+
+export function storyStatus(r: BandProfileRecord): SectionStatus {
+  const obs = storyObservations(r);
+  const n = r.stories.items.length;
+  const shown = Math.max(-1, ...obs.map((o) => o.shown ?? -1));
+  const detailed = r.stories.items.filter((x) => x.textSource === "detail").length;
+  const shortComments = r.stories.items.filter((x) => x.commentsState === "partial").length;
+  if (n > 0) {
+    const parts = [`스토리 ${n}개 저장`];
+    if (shown > n) parts.push(`표시 ${shown}개`);
+    if (detailed < n) parts.push(`상세 ${detailed}/${n}`);
+    if (shortComments) parts.push(`댓글 모자란 스토리 ${shortComments}개`);
+    const needsMore = shown > n || detailed < n || shortComments > 0;
+    return { text: parts.join(" · ") + (needsMore ? " · 보완 필요" : ""), tone: needsMore ? "warn" : "ok", needsMore };
+  }
+  const pageEmpty = obs.some((o) => o.surface === "profilePage" && o.emptyShown);
+  const pageSeen = obs.some((o) => o.surface === "profilePage");
+  if (pageEmpty && shown > 0)
+    return { text: `개수 불일치 · 재확인 필요(팝업 표시 ${shown}개, 프로필 화면은 '스토리 없음' 안내)`, tone: "warn", needsMore: true };
+  if (pageEmpty) return { text: "이 화면에서 스토리 없음 확인", tone: "muted", needsMore: false };
+  if (shown === 0) return { text: "스토리 0개 표시", tone: "muted", needsMore: false };
+  if (shown > 0) return { text: `표시 ${shown}개 · 상세 미수집`, tone: "warn", needsMore: true };
+  if (pageSeen) return { text: "스토리 목록이 비어 있었음(로딩 완료·없음 안내 확인 못 함)", tone: "warn", needsMore: true };
+  if (r.stories.state === "unrecognized") return { text: "스토리 확인 못 함(구조 미인식 또는 표시되지 않음)", tone: "warn", needsMore: true };
+  return { text: "스토리 수집 안 함", tone: "muted", needsMore: false };
+}
+
+export function memberPhotosStatus(r: BandProfileRecord): SectionStatus {
+  const mp = r.memberPhotos;
+  if (!mp || mp.state === "notCollected") return { text: "사진첩 수집 안 함", tone: "muted", needsMore: false };
+  if (mp.state === "none") return { text: "사진첩 0장 확인", tone: "muted", needsMore: false };
+  if (mp.state === "unrecognized") return { text: "사진첩 확인 못 함(구조 미인식 또는 표시되지 않음)", tone: "warn", needsMore: true };
+  const end = mp.end === "notChecked" ? " · 목록 끝 확인 못 함(저장 페이지)" : mp.end === "noProgress" ? " · 목록 끝: 더 불러와지지 않을 때까지" : "";
+  return { text: `사진첩 ${mp.items.length}장 저장(목록 이미지)${end}`, tone: "ok", needsMore: false };
+}
+
+export function photoHistoryStatus(r: BandProfileRecord): SectionStatus {
+  if (r.photoHistory.state === "collected") return { text: `사진 이력 ${r.photoHistory.items.length}장`, tone: "ok", needsMore: false };
+  if (r.photoHistory.state === "none") return { text: "사진 이력 0장 확인", tone: "muted", needsMore: false };
+  return { text: "프로필 사진 이력 구조 미확인(현재 사진만 저장)", tone: "warn", needsMore: false };
+}
+
+/** 프로필 요약 한 줄(목록·알림·HTML 목차) */
+export function profileSummary(r: BandProfileRecord): string {
+  const photos = r.memberPhotos && r.memberPhotos.state !== "notCollected" ? ` · ${memberPhotosStatus(r).text}` : "";
+  return `${r.name ?? "이름 확인 못 함"} · ${storyStatus(r).text}${photos}${r.identity === "unconfirmed" ? " · 인물 연결 미확인" : ""}`;
+}
+
+/** 보완이 필요한가(이어 수집 대상) */
+export const profileNeedsMore = (r: BandProfileRecord) => storyStatus(r).needsMore || memberPhotosStatus(r).needsMore || r.stories.items.some((x) => x.commentsState === "partial");
 
 // ---------- 합치기(같은 인물의 새 관측) ----------
 
@@ -498,6 +591,8 @@ export interface ProfileMergeResult {
   /** 목록 글 → 상세 전문 보완 */
   textsCompleted: number;
   basicsChanged: boolean;
+  /** 사진첩에 더한 사진 수 */
+  photosAdded: number;
   changed: boolean;
 }
 
@@ -559,6 +654,8 @@ export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileReco
     }
     hit.commentsState = commentsState(hit.commentsShown, hit.comments.length, hit.commentsState !== "notCollected" || s.commentsState !== "notCollected");
   }
+  const obsKey = (o: StoryObservation) => JSON.stringify(o);
+  const mergedObs = [...(old.stories.observations ?? []), ...(inc.stories.observations ?? [])].filter((o, i, a) => a.findIndex((x) => obsKey(x) === obsKey(o)) === i);
   const storyState: BandProfileRecord["stories"]["state"] = items.length ? "collected" : old.stories.state === "none" || inc.stories.state === "none" ? "none" : old.stories.state === "unrecognized" ? inc.stories.state : old.stories.state;
   // 작성 사진: 같은 사진(파일명)은 하나로
   const photoKey = (p: { image: BandImageRef }) => p.image.ref ?? p.image.src;
@@ -570,7 +667,7 @@ export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileReco
       photosAdded++;
     }
   const photoStates = [old.memberPhotos?.state, inc.memberPhotos?.state];
-  const memberPhotos: BandProfileRecord["memberPhotos"] = photoItems.length ? { state: "collected", items: photoItems } : photoStates.includes("none") ? { state: "none", items: [] } : (old.memberPhotos ?? inc.memberPhotos);
+  const memberPhotos: BandProfileRecord["memberPhotos"] = photoItems.length ? { state: "collected", items: photoItems, end: inc.memberPhotos?.end ?? old.memberPhotos?.end } : photoStates.includes("none") ? { state: "none", items: [] } : (old.memberPhotos ?? inc.memberPhotos);
   const rank = { profilePage: 3, profilePopup: 2, memberPage: 1 } as const;
   const record: BandProfileRecord = {
     ...old,
@@ -578,10 +675,10 @@ export function mergeProfileRecords(old: BandProfileRecord, inc: BandProfileReco
     memberPhotos,
     surface: rank[inc.surface] > rank[old.surface] ? inc.surface : old.surface,
     storyCountShown: (newer ? inc.storyCountShown : old.storyCountShown) ?? old.storyCountShown ?? inc.storyCountShown,
-    stories: { state: storyState, items },
+    stories: { state: storyState, items, observations: mergedObs },
     history: history.length ? history : undefined,
     notes: [...new Set([...old.notes, ...inc.notes])],
   };
   const changed = basicsChanged || photosAdded > 0 || (old.memberPhotos?.state ?? null) !== (memberPhotos?.state ?? null) || storiesAdded > 0 || commentsAdded > 0 || textsCompleted > 0 || JSON.stringify(old.stories.items.map((s) => [s.reactionsShown, s.commentsShown])) !== JSON.stringify(items.slice(0, old.stories.items.length).map((s) => [s.reactionsShown, s.commentsShown]));
-  return { record, storiesAdded, commentsAdded, textsCompleted, basicsChanged, changed };
+  return { record, storiesAdded, commentsAdded, textsCompleted, basicsChanged, photosAdded, changed };
 }

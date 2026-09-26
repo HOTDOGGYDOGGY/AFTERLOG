@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { bandMemberKey, mergeProfileRecords, parseBandMemberPath, parseBandProfileDocument, savedFromUrl } from "../../src/importers/band/profile";
+import { bandMemberKey, memberPhotosStatus, mergeProfileRecords, parseBandMemberPath, parseBandProfileDocument, savedFromUrl, storyStatus } from "../../src/importers/band/profile";
 import { parseBandHtml } from "../../src/importers/band/html";
 import { FIXTURE_DIR } from "./helpers";
 
@@ -134,17 +134,62 @@ describe("인물 화면(작성글·사진 탭) 저장 페이지", () => {
     const [other] = parse(load("member-page-popup.html").replace('<strong class="userName">가상리더</strong>', '<strong class="userName">다른사람</strong>'));
     expect(other).toMatchObject({ identity: "unconfirmed", memberKey: null });
   });
-  it("'사진' 탭: 사진 목록을 원본 주소로(목록은 축소본), 같은 인물 프로필에 합친다", () => {
+  it("A01·A04 '사진' 탭은 사진첩(사진 이력 아님): 보인 주소 그대로(크기 매개변수를 지워 원본이라 하지 않음), 같은 인물 프로필에 합친다", () => {
     const [ph] = parse(load("member-photos.html"));
     expect(ph).toMatchObject({ surface: "memberPage", memberKey: "ZzYyXx======", name: "가상리더" });
-    expect(ph.memberPhotos?.items.map((x) => [x.image.src, x.thumb?.src ?? null])).toEqual([
-      ["https://coresos-phinf.pstatic.net/a/abc/p_one.jpg", "https://coresos-phinf.pstatic.net/a/abc/p_one.jpg?type=s150"],
-      ["./photo_files/p_two.jpg", null],
+    expect(ph.memberPhotos?.items.map((x) => [x.image.src, x.quality])).toEqual([
+      ["https://coresos-phinf.pstatic.net/a/abc/p_one.jpg?type=s150", "list"],
+      ["./photo_files/p_two.jpg", "list"],
     ]);
+    expect(ph.photoHistory.state).toBe("unrecognized");
+    // 사진 링크가 '#'뿐이면 사진 원문 주소를 만들어 내지 않는다
+    expect(JSON.stringify(ph.memberPhotos)).not.toMatch(/photo#|\/photo\/\d/);
+    expect(memberPhotosStatus(ph).text).toContain("목록 끝 확인 못 함");
     const [pop] = parse(load("member-page-popup.html"));
     const m = mergeProfileRecords(pop, ph);
     expect(m.record).toMatchObject({ surface: "profilePopup", description: "가상 소개" });
     expect(m.record.memberPhotos?.items).toHaveLength(2);
     expect(mergeProfileRecords(m.record, ph).changed).toBe(false);
+  });
+});
+
+describe("스토리 수 판정(명세 6.2)", () => {
+  const pagePlusPopup = (emptyText: boolean) => {
+    const [page] = parse(
+      load("profile-page.html")
+        .replace(/<li data-viewname="DProfileStoryListItemView"[\s\S]*<\/ol>/, emptyText ? '<div class="uEmpty"><strong>아직 작성된 스토리가 없어요.</strong></div></ol>' : "</ol>")
+        .replace(/<section data-viewname="DProfileStoryDetailLayerView"[\s\S]*<\/section>/, ""),
+    );
+    return page;
+  };
+  it("S01 팝업 표시 1개·상세 미수집: 0개 확인이라 하지 않는다", () => {
+    const [pop] = parse(load("member-popup.html"));
+    expect(storyStatus(pop)).toMatchObject({ text: "표시 1개 · 상세 미수집", needsMore: true });
+  });
+  it("S03 팝업 표시 1개 + 프로필 화면 빈 안내: 두 관측을 보존하고 불일치로 표시", () => {
+    const [pop] = parse(load("member-popup.html"));
+    const page = pagePlusPopup(true);
+    expect(storyStatus(page).text).toBe("이 화면에서 스토리 없음 확인");
+    const m = mergeProfileRecords({ ...pop, bandNo: page.bandNo, memberKey: page.memberKey, identity: "confirmed" }, page, { sameObservation: true }).record;
+    expect(m.stories.observations?.map((o) => [o.surface, o.shown, o.emptyShown])).toEqual([
+      ["profilePopup", 1, false],
+      ["profilePage", null, true],
+    ]);
+    expect(storyStatus(m)).toMatchObject({ needsMore: true });
+    expect(storyStatus(m).text).toContain("개수 불일치");
+  });
+  it("S02 목록이 비었지만 빈 안내가 없으면(로딩 중일 수 있음) '없음 확인'이라 하지 않는다", () => {
+    expect(storyStatus(pagePlusPopup(false))).toMatchObject({ needsMore: true });
+    expect(storyStatus(pagePlusPopup(false)).text).not.toContain("없음 확인");
+  });
+  it("표시 4·상세 3이면 저장 3·보완 필요", () => {
+    const [page] = parse(load("profile-page.html"));
+    const r = { ...page, stories: { ...page.stories, observations: [...(page.stories.observations ?? []), { at: null, surface: "profilePopup" as const, shown: 4, found: 0, detailed: 0, emptyShown: false }] } };
+    expect(storyStatus(r).text).toBe("스토리 2개 저장 · 표시 4개 · 상세 1/2 · 보완 필요");
+  });
+  it("목차와 상세가 같은 문구(HTML 상세에 공통 상태 한 줄)", async () => {
+    const { renderProfileHtml } = await import("../../src/exporters/profileHtml");
+    const page = pagePlusPopup(true);
+    expect(renderProfileHtml(page, () => null)).toContain(storyStatus(page).text);
   });
 });
