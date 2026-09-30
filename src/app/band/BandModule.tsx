@@ -17,6 +17,8 @@ import { PersonLayer } from "./PersonLayer";
 import { ImportPanel } from "../panels/ImportPanel";
 import { ProfileSnapshots } from "./ProfileSnapshots";
 import { ProfilePanel, useProfiles, type ProfileEntry } from "./ProfileView";
+import { AlbumView } from "./AlbumView";
+import { buildAlbum, type AlbumPlace } from "./album";
 import { CaptureReports } from "../panels/CaptureReports";
 import { ExportDialog } from "../panels/ExportDialog";
 import type { AppThemeResolved } from "../../renderers/band/style";
@@ -186,6 +188,7 @@ export function BandModule({
   ) : null;
 
   const profiles = useProfiles(projectId, `${captureReports.length}:${dataVersion ?? 0}`) ?? [];
+  const album = useMemo(() => buildAlbum(docs, profiles, assetIdBySha), [docs, profiles, assetIdBySha]);
 
   // ---------- 자료가 없을 때 ----------
   if (!projectId || docs.length === 0) {
@@ -207,7 +210,14 @@ export function BandModule({
   }
 
   const personRoute = route.screen === "person" ? people.find((p) => p.key === route.person) ?? null : null;
-  const layerOpen = mode !== "edit" && (!!openDoc || !!personRoute || route.screen === "chat");
+  const layerOpen = mode !== "edit" && (!!openDoc || !!personRoute || route.screen === "chat" || route.screen === "album");
+  const openPlace = (p: AlbumPlace) => {
+    if (p.profileId) {
+      setProfileOpen(p.profileId);
+      return;
+    }
+    if (p.docId) navigate({ screen: "post", docId: p.docId, entryId: p.entryId });
+  };
 
   return (
     <div className="band-module" hidden={!active}>
@@ -241,10 +251,12 @@ export function BandModule({
           appTheme={appTheme}
           dimmed={layerOpen}
           captureCount={captureReports.length}
-          sideExtra={<ProfileSnapshots profiles={profiles} onOpen={setProfileOpen} />}
+          sideExtra={<ProfileSnapshots profiles={profiles} onOpen={setProfileOpen} assetUrl={assets.url} assetIdBySha={assetIdBySha} />}
           onOpenDoc={(id) => navigate({ screen: "post", docId: id })}
           onOpenPerson={(key) => navigate({ screen: "person", person: key })}
           onOpenChat={() => navigate({ screen: "chat" })}
+          albumCount={album.items.length}
+          onOpenAlbum={() => navigate({ screen: "album" })}
         />
       ) : null}
 
@@ -308,6 +320,19 @@ export function BandModule({
             </div>
           </div>
           <button type="button" className="band-layer-close" aria-label="채팅 닫기" onClick={closeLayer}>
+            <Icon name="close" size={26} />
+          </button>
+          {active ? <EscToClose onClose={closeLayer} /> : null}
+        </div>
+      ) : null}
+
+      {mode !== "edit" && route.screen === "album" ? (
+        <div className="band-stage">
+          <div className="band-dim" onClick={closeLayer} aria-hidden="true" />
+          <div className="band-layer band-album-layer" role="dialog" aria-label="사진첩">
+            <AlbumView album={album} assetUrl={assets.url} onOpenPlace={openPlace} />
+          </div>
+          <button type="button" className="band-layer-close" aria-label="사진첩 닫기" onClick={closeLayer}>
             <Icon name="close" size={26} />
           </button>
           {active ? <EscToClose onClose={closeLayer} /> : null}

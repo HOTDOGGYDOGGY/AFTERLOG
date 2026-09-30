@@ -88,3 +88,41 @@ test("프로필만 있는 .afterlog: 프로필이 화면 가운데에 보이고,
   await expect(page.locator(".band-card")).toHaveCount(21);
   expect(errors).toEqual([]);
 });
+
+test("사진첩·날짜 이동: 같은 파일은 한 칸(쓰인 곳 수), 크게 보기에서 원래 글로, 달력에서 그 날 글로", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(pathToFileURL(INDEX).href);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
+  await expect(page.locator(".band-card")).toHaveCount(21, { timeout: 15_000 });
+  // 목록 상태 표식은 색만이 아니라 글자로
+  await expect(page.locator(".band-card .al-state").first()).toContainText("미확보");
+  // 날짜 이동
+  await page.getByRole("button", { name: "날짜", exact: true }).click();
+  const day = page.locator(".date-day.has-posts").first();
+  await expect(day).toBeVisible();
+  await day.click();
+  await expect(page.locator(".band-card.is-flash")).toHaveCount(1);
+  // 사진첩
+  await page.locator(".band-side-link").click();
+  await expect(page).toHaveURL(/#\/band\/album$/);
+  const item = page.locator(".album-item");
+  await expect(item).toHaveCount(1);
+  await expect(item.locator("small")).toHaveText(/\d+곳/);
+  await item.click();
+  const lb = page.locator(".al-lightbox");
+  await expect(lb).toBeVisible();
+  await expect(lb).toContainText("같은 파일이");
+  // 크게 보기는 화면 전체(레이어 폭에 갇히지 않음)
+  const box = await lb.boundingBox();
+  expect(box!.width).toBeGreaterThan(1300);
+  await lb.getByRole("button", { name: /→$/ }).first().click();
+  await expect(page).toHaveURL(/#\/band\/post\//);
+  await expect(page.locator(".band-layer .al-post-head")).toBeVisible();
+  // 뒤로 가면 사진첩
+  await page.goBack();
+  await expect(page.locator(".album-view")).toBeVisible();
+  expect(errors).toEqual([]);
+});

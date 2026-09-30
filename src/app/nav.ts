@@ -1,5 +1,5 @@
 // 앱 탐색 상태 = 주소의 해시. 새로고침하면 같은 플랫폼·글·인물·댓글로 돌아오고, 브라우저 뒤로가기가 앱 안의 이동을 되돌린다.
-// 형식: #/band · #/band/post/<문서>[/<항목>] · #/band/person/<인물키> · #/band/chat · #/kakao 등
+// 형식: #/band · #/band/post/<문서>[/<항목>] · #/band/person/<인물키> · #/band/chat · #/band/album · #/kakao 등
 import { useCallback, useEffect, useState } from "react";
 import { PLATFORMS, type PlatformId } from "./shell/platforms";
 
@@ -7,7 +7,8 @@ export type BandRoute =
   | { screen: "home" }
   | { screen: "post"; docId: string; entryId?: string }
   | { screen: "person"; person: string; tab?: PersonTab }
-  | { screen: "chat" };
+  | { screen: "chat" }
+  | { screen: "album" };
 export type PersonTab = "posts" | "comments" | "stories" | "reactions";
 
 export interface Route {
@@ -23,6 +24,7 @@ export function formatRoute(r: Route): string {
   if (b.screen === "post") return `#/band/post/${enc(b.docId)}${b.entryId ? `/${enc(b.entryId)}` : ""}`;
   if (b.screen === "person") return `#/band/person/${enc(b.person)}${b.tab && b.tab !== "posts" ? `/${b.tab}` : ""}`;
   if (b.screen === "chat") return "#/band/chat";
+  if (b.screen === "album") return "#/band/album";
   return "#/band";
 }
 
@@ -40,6 +42,7 @@ export function parseRoute(hash: string, fallback: PlatformId = "band"): Route {
     if (parts[1] === "post" && parts[2]) band = { screen: "post", docId: parts[2], entryId: parts[3] || undefined };
     else if (parts[1] === "person" && parts[2]) band = { screen: "person", person: parts[2], tab: (["posts", "comments", "stories", "reactions"] as const).find((t) => t === parts[3]) };
     else if (parts[1] === "chat") band = { screen: "chat" };
+    else if (parts[1] === "album") band = { screen: "album" };
   }
   return { platform: p, band };
 }

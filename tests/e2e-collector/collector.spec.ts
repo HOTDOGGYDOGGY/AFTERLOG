@@ -233,6 +233,8 @@ test("밴드 화면 저장 막대: 글 화면·목록 화면에서 바로 저장
   const bar = band.locator("#afterlog-collector-bar");
   await expect(bar.getByRole("button", { name: "이 글 저장" })).toBeVisible();
   await expect(bar.getByRole("button", { name: "골라서 저장…" })).toBeVisible();
+  // 막대 앞에 범위를 밝힌다
+  await expect(bar.locator(".scope")).toHaveText("이 글");
   await band.screenshot({ path: `${OUT}/04-page-bar.png` });
 
   // 이 글 저장: 지금 탭을 그대로 읽는다
@@ -243,11 +245,15 @@ test("밴드 화면 저장 막대: 글 화면·목록 화면에서 바로 저장
   await waitStatus(mgr, /끝남/, 60_000);
   await expect(stat(mgr, "확보").first()).toHaveText("1");
   expect(band.url()).toBe(`${BAND}/post/3`);
+  // 막대에 진행 수(숫자)가 돌아온다
+  await expect(bar.locator(".prog")).toContainText(/끝남 · 글 1\/1 · 댓글 \d+ · 이미지 \d+/, { timeout: 10_000 });
+  await band.screenshot({ path: `${OUT}/04b-page-bar-progress.png` });
   await mgr.close();
 
   // 목록 화면: '이 글 저장'은 없고 전체 저장만
   await band.goto(BAND);
   await expect(bar.getByRole("button", { name: "이 글 저장" })).toBeHidden();
+  await expect(bar.locator(".scope")).toHaveText("밴드 전체");
   mgrPromise = ctx.waitForEvent("page");
   await bar.getByRole("button", { name: "이 밴드 글 전체 저장" }).click();
   mgr = await mgrPromise;

@@ -5,6 +5,7 @@
    - 누르면 확장의 수집 관리 창이 열려 작업을 만들고 바로 시작한다. 이 스크립트는 밴드에 글·댓글·표정을 쓰지 않고, 글 내용을 읽지 않는다.
    - '직접 열며 수집'을 켜면 사용자가 여는 화면(프로필·스토리·팝업·사진 탭)이 바뀔 때마다 알려 수집 관리 창이 그 화면을 읽게 한다.
      바뀜 판단에는 화면 구조 표시(열린 영역·항목 수·이름)만 쓰고 그 값은 어디에도 보내지 않는다. 누르거나 쓰지 않는다.
+   - 막대 앞에 지금 화면의 범위(이 글·이 인물·밴드 전체 등)를, 수집 중에는 관리 창이 보내 준 진행 수(글·댓글·이미지)를 보여 준다.
    - 밴드는 주소만 바뀌는 화면 전환을 하고, 프로필은 주소 변화 없이 팝업으로 열리기도 한다(실제 저장 표본).
      그래서 주소와 함께 '열린 프로필 팝업이 있는지'(화면 구조 표시만, 내용은 읽지 않음)를 주기적으로 확인해 버튼을 바꾼다. */
 (function () {
@@ -47,6 +48,17 @@
     search: [["search", "이 검색 결과 저장", true], ["follow", "직접 열며 수집"], ["form", "검색 조건 수정…"]],
   };
 
+  // 막대 앞에 보이는 지금 화면의 범위(디자인 참고 09: 이 글 / 이 인물 / 밴드 전체를 먼저 밝힌다)
+  var SCOPE = {
+    post: "이 글",
+    band: "밴드 전체",
+    member: "이 인물",
+    profile: "이 인물 프로필",
+    popup: "팝업 프로필",
+    memberComment: "인물 댓글 목록",
+    search: "검색 결과",
+  };
+
   var host = document.createElement("div");
   host.id = "afterlog-collector-bar";
   host.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:2147483000;";
@@ -62,10 +74,16 @@
     "button:disabled{opacity:.45;cursor:default}button.icon{width:26px;padding:0;background:transparent;color:#aab2bf}" +
     ".pill{height:30px;padding:0 12px;border-radius:15px;background:#202329;color:#eceef2;box-shadow:0 4px 14px rgba(0,0,0,.3)}" +
     ".note{font-size:11px;color:#aab2bf;padding:0 4px}" +
+    ".scope{font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid #3a404a;color:#d5dae2;white-space:nowrap}" +
+    ".follow{font-size:11px;padding:3px 8px;border-radius:6px;background:#1d3027;color:#8fe0b0;border:1px solid #2f6a48;white-space:nowrap}" +
+    ".prog{font-size:12px;padding:0 6px;color:#eceef2;white-space:nowrap;font-variant-numeric:tabular-nums}.prog.is-finished{color:#8fe0b0}.prog.is-paused{color:#f0b44c}" +
     "</style>" +
     '<div class="bar" part="bar">' +
     '<span class="brand">AFTERLOG</span>' +
+    '<span class="scope" title="지금 화면에서 저장할 범위"></span>' +
+    '<span class="follow" hidden>● 직접 열며 수집 켜짐</span>' +
     '<span class="acts"></span>' +
+    '<span class="prog" role="status" hidden></span>' +
     '<button type="button" data-act="manager">수집 관리</button>' +
     '<span class="note" hidden></span>' +
     '<button type="button" class="icon" data-act="hide" title="숨기기(이 탭에서만)" aria-label="저장 막대 숨기기">×</button>' +
@@ -76,6 +94,9 @@
   var pill = root.querySelector(".pill");
   var acts = root.querySelector(".acts");
   var note = root.querySelector(".note");
+  var scopeEl = root.querySelector(".scope");
+  var followEl = root.querySelector(".follow");
+  var progEl = root.querySelector(".prog");
 
   function setHidden(h) {
     bar.hidden = h;
@@ -108,6 +129,7 @@
     if (p && pop) p = { kind: "popup", bandNo: p.bandNo };
     host.style.display = p ? "" : "none";
     if (!p) return;
+    scopeEl.textContent = SCOPE[p.kind] || "";
     acts.textContent = "";
     ACTIONS[p.kind].forEach(function (a) {
       var b = document.createElement("button");
@@ -166,6 +188,7 @@
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden"] });
   function setFollow(on, text) {
     following = on;
+    followEl.hidden = !on;
     var b = acts.querySelector('[data-act="follow"]');
     if (b) {
       b.textContent = on ? "직접 열며 수집 중 · 멈추기" : "직접 열며 수집";
@@ -179,6 +202,12 @@
   }
   chrome.runtime.onMessage.addListener(function (msg) {
     if (msg && msg.type === "afterlog-follow-state") setFollow(!!msg.on, msg.text || "");
+    // 수집 관리 창이 보내는 진행 수(글·댓글·이미지 수와 상태만)
+    if (msg && msg.type === "afterlog-progress" && typeof msg.text === "string") {
+      progEl.textContent = msg.text;
+      progEl.className = "prog is-" + (msg.state === "finished" ? "finished" : msg.state === "paused" ? "paused" : "running");
+      progEl.hidden = false;
+    }
   });
 
   function flash(text, ms) {

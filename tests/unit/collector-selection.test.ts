@@ -437,3 +437,19 @@ describe("확장에서 보관 파일 가져오기", () => {
     expect(await cdb().jobs.count()).toBe(0);
   });
 });
+
+describe("저장 막대 진행 수", () => {
+  it("상태와 글·댓글·프로필·이미지 수를 숫자로(결과에서 뺀 글 제외)", async () => {
+    const { barProgress } = await import("../../collector/src/barProgress");
+    const tasks = [
+      { kind: "post", status: "succeeded" },
+      { kind: "post", status: "failed" },
+      { kind: "post", status: "pending" },
+      { kind: "profile", status: "partial" },
+    ] as const;
+    const caps = [{ commentsFound: 12 }, { commentsFound: 3, excluded: "noMatch" as const }];
+    expect(barProgress({ status: "running" }, [...tasks], caps, 1234).text).toBe("수집 중 · 글 2/3 · 댓글 12 · 프로필 1/1 · 이미지 1,234 · 실패 1");
+    expect(barProgress({ status: "finished" }, [{ kind: "post", status: "succeeded" }], [{ commentsFound: 0 }], 0)).toEqual({ state: "finished", text: "끝남 · 글 1/1 · 댓글 0 · 이미지 0" });
+    expect(barProgress({ status: "running" }, [{ kind: "list", status: "inFlight" }], [], 0).text).toBe("수집 중 · 글 목록 확인 중 · 이미지 0");
+  });
+});

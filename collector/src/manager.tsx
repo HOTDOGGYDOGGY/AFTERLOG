@@ -12,6 +12,7 @@ import { describeSelection } from "./selection";
 import { readArchive, type ArchiveReadResult } from "../../src/archive/reader";
 import { summarizeArchive, type ArchiveSummary } from "./archiveImport";
 import { computeOutcome, computeTotals, followUpText } from "./totals";
+import { barProgress } from "./barProgress";
 import { applyFollowScreen, logFollow, type FollowOutcome } from "./follow";
 import { profileImages, profileSummary, type BandProfileRecord } from "../../src/importers/band/profile";
 import { renderProfileHtml } from "../../src/exporters/profileHtml";
@@ -68,6 +69,8 @@ function Manager() {
   const [runningHere, setRunningHere] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const engineRef = useRef<Engine | null>(null);
+  /** 저장 막대를 누른 탭(진행 수를 돌려 보낼 곳) */
+  const originRef = useRef<{ tabId: number; jobId: string; last: string; sending?: boolean } | null>(null);
   const browserRef = useRef<ChromeBrowser | null>(null);
 
   const reload = useCallback(async () => {
@@ -224,6 +227,8 @@ function Manager() {
         return;
       }
       history.replaceState(null, "", `?job=${created.id}`);
+      const origin = Number(params.get("origin") || params.get("tabId"));
+      if (origin && kind !== "follow") originRef.current = { tabId: origin, jobId: created.id, last: "" };
       setSel(created.id);
       setCreating(false);
       await reload();
@@ -231,6 +236,37 @@ function Manager() {
       else void start(created.id);
     })();
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 저장 막대에 진행 수 알리기(막대를 누른 탭에만. 끝난 뒤 한 번 더 보내고 멈춘다)
+  useEffect(() => {
+    const t = setInterval(() => {
+      const o = originRef.current;
+      if (!o || o.sending) return;
+      o.sending = true;
+      void (async () => {
+        try {
+          const j = await cdb().jobs.get(o.jobId);
+          if (!j) return;
+          const ts = await cdb().tasks.where("jobId").equals(o.jobId).toArray();
+          const cs = await cdb().captures.where("jobId").equals(o.jobId).toArray();
+          const ps = await cdb().profiles.where("jobId").equals(o.jobId).toArray();
+          const urls = [...new Set([...cs.flatMap((c) => c.imageUrls), ...ps.flatMap((p) => p.imageUrls)])];
+          const stored = (await cdb().assets.bulkGet(urls)).filter((a) => a?.status === "stored").length;
+          const p = barProgress(j, ts, cs, stored);
+          if (p.text !== o.last) {
+            o.last = p.text;
+            await chrome.tabs.sendMessage(o.tabId, { type: "afterlog-progress", state: p.state, text: p.text }).catch(() => undefined);
+          }
+          if (p.state === "finished") originRef.current = null;
+        } catch {
+          /* 탭이 닫힘 */
+        } finally {
+          o.sending = false;
+        }
+      })();
+    }, 1500);
+    return () => clearInterval(t);
+  }, []);
 
   const job = jobs.find((j) => j.id === sel) ?? null;
   const [archive, setArchive] = useState<{ r: ArchiveReadResult; summary: ArchiveSummary } | null>(null);

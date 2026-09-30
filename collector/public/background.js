@@ -38,6 +38,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     q.set("new", "form");
     q.set("url", sender.tab.url || "");
   }
+  // 진행 수를 돌려 보낼 탭(막대를 누른 탭)
+  if (q.get("new") && q.get("new") !== "form") q.set("origin", String(sender.tab.id));
   chrome.tabs.create({ url: chrome.runtime.getURL(`manager.html${q.toString() ? `?${q}` : ""}`) }).then(() => reply({ ok: true }));
   return true;
 });
