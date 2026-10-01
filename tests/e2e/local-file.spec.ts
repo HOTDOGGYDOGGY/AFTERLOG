@@ -126,3 +126,60 @@ test("사진첩·날짜 이동: 같은 파일은 한 칸(쓰인 곳 수), 크게
   await expect(page.locator(".album-view")).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("인물별 꾸미기·되돌리기: 말풍선 위치·색은 그 인물에만, 묶음 기본값·인물 꾸밈 지우기·모든 글 적용은 '취소'로 되돌린다", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("dialog", (d) => void d.accept());
+  await page.goto(pathToFileURL(INDEX).href);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "파일 열기", exact: true }).click();
+  await (await chooser).setFiles(resolve(process.cwd(), "tests/fixtures/afterlog/collector-sample.afterlog"));
+  await expect(page.locator(".band-card")).toHaveCount(21, { timeout: 15_000 });
+  await page.locator(".band-card-open").first().click();
+  await page.getByRole("button", { name: "꾸미기" }).click();
+  const panel = page.locator(".design-panel");
+  const layer = page.locator(".band-layer");
+  await panel.getByRole("button", { name: "인물별" }).click();
+  await panel.getByRole("button", { name: "말풍선으로 바꾸기" }).click();
+  await expect(layer.locator(".al-skin-bubble").first()).toBeVisible();
+  // 첫 인물: 오른쪽 + 말풍선 바탕색
+  const row = panel.locator(".design-person-row").first();
+  const who = (await row.locator(".design-person-name").textContent())!.trim();
+  await row.click();
+  await expect(row).toContainText("고르는 중");
+  await panel.locator(".design-person-edit").getByRole("radio", { name: "오른쪽" }).click();
+  const right = layer.locator(".al-comment.is-right");
+  await expect(right.first()).toBeVisible();
+  await expect(right.first().locator(".al-name")).toHaveText(who);
+  const nRight = await right.count();
+  const nAll = await layer.locator(".al-comment").count();
+  expect(nRight).toBeLessThan(nAll);
+  await panel.locator(".design-person-edit .ui-swatch").nth(1).click();
+  await page.locator(".ui-color-pop .ui-swatch").nth(4).click();
+  await panel.locator(".panel-head strong").click();
+  expect(await right.first().locator(".al-comment-body").getAttribute("style")).toContain("--al-bubble");
+  // 인물 꾸밈 모두 지우기 → 취소
+  await panel.locator(".design-reset summary").click();
+  await panel.getByRole("button", { name: "인물별 꾸밈 모두 지우기" }).click();
+  await expect(right).toHaveCount(0);
+  await expect(panel.locator(".design-msg")).toContainText("되돌렸습니다");
+  await panel.locator(".design-msg").getByRole("button", { name: "취소" }).click();
+  await expect(right).toHaveCount(nRight);
+  // 묶음만 기본값: 본문·댓글(말풍선 → 밴드형) → 취소
+  await panel.getByRole("button", { name: "본문·댓글" }).click();
+  await panel.getByRole("button", { name: "이 묶음만 기본값으로" }).click();
+  await expect(layer.locator(".al-skin-bubble")).toHaveCount(0);
+  await panel.locator(".design-msg").getByRole("button", { name: "취소" }).click();
+  await expect(layer.locator(".al-skin-bubble").first()).toBeVisible();
+  // 모든 글에 적용 → 취소: 다른 글은 원래(밴드형)로
+  await panel.getByRole("button", { name: "모든 글에 적용" }).click();
+  await expect(panel.locator(".design-msg")).toContainText("적용했습니다");
+  await panel.locator(".design-msg").getByRole("button", { name: "취소" }).click();
+  await expect(panel.locator(".design-msg")).toContainText("적용 전으로 되돌렸습니다");
+  await page.locator(".band-layer-close").first().click();
+  await page.locator(".band-card-open").nth(1).click();
+  await expect(page.locator(".band-layer .al-post-head")).toBeVisible();
+  await expect(page.locator(".band-layer .al-skin-bubble")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

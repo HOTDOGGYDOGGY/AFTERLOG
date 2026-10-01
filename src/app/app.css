@@ -1158,10 +1158,128 @@ button.date-day:focus-visible {
 }
 .design-foot {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--line);
+}
+.design-foot-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* 되돌리기: 적용 버튼과 떨어뜨리고 접어 둔다(디자인 참고 07 개선점) */
+.design-reset {
+  border-top: 1px dashed var(--line-soft);
+  padding-top: 6px;
+}
+.design-reset summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+.design-reset[open] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.design-reset p {
+  margin: 4px 0 0;
+}
+.design-sec-reset {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 0 -4px;
+}
+.design-msg {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.design-msg .ui-link {
+  font-weight: 600;
+}
+.design-people-note {
+  margin: 0;
+}
+.design-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.design-people > li {
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+.design-people > li.is-open {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+.design-person-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.design-person-row:hover {
+  background: var(--hover);
+}
+.design-person-row .al-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--hover);
+  color: var(--muted);
+  font-weight: 700;
+  border-radius: 50%;
+}
+.design-person-row .al-avatar.is-square {
+  border-radius: 2px;
+}
+.design-person-row .al-avatar.is-rounded {
+  border-radius: 8px;
+}
+.design-person-row .al-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.design-person-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.design-person-row small {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.design-person-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 10px 10px;
 }
 .preset-list {
   list-style: none;

@@ -1,14 +1,14 @@
-// 인물 목록(간결한 행) + 선택한 인물만 편집(V05). 이름·소개·인장 교체·자르기·모양·이름색·숨기기·합치기를 여기서 한다.
+// 인물 목록(간결한 행) + 선택한 인물만 편집(V05). 이름·소개·인장 교체·자르기·숨기기·합치기(자료)를 여기서 한다.
+// 이름색·말풍선·인장 모양 같은 보이는 모양은 꾸미기 패널의 '인물별'에서 한다(디자인 참고 08: 외형과 작성자 자료를 섞지 않음).
 // 원본 이미지 바이트는 바꾸지 않고 표시용 자르기(crop)·모양만 인물 설정에 저장한다.
 import { useState } from "react";
 import * as C from "../../editor/commands";
-import { ColorPicker } from "../../components/ColorPicker";
 import { Icon } from "../../components/Icon";
-import { Segmented, Slider } from "../../components/Slider";
+import { Slider } from "../../components/Slider";
 import { addAsset } from "../../storage/repo";
 import { pickFiles } from "../download";
 import { Avatar } from "../../renderers/band/BandView";
-import type { AvatarShape, Identity } from "../../domain/types";
+import type { Identity } from "../../domain/types";
 import type { DocEditor } from "../useDocEditor";
 
 export function PeoplePanel({
@@ -133,18 +133,6 @@ function PersonEditor({
           ) : null}
         </div>
       </div>
-      <Segmented<AvatarShape | "doc">
-        label="이 인물의 인장 모양"
-        value={p.style?.avatarShape ?? "doc"}
-        disabled={ro}
-        options={[
-          ["doc", "문서 설정"],
-          ["circle", "원형"],
-          ["square", "사각"],
-          ["rounded", "둥근 사각"],
-        ]}
-        onChange={(v) => setStyle({ avatarShape: v === "doc" ? undefined : v })}
-      />
       {p.avatarAssetId ? (
         <fieldset className="field crop" disabled={ro}>
           <legend>인장 자르기 (표시만 · 원본 유지)</legend>
@@ -159,12 +147,7 @@ function PersonEditor({
         </fieldset>
       ) : null}
 
-      <div className="field-row">
-        <span>이름 색</span>
-        <ColorPicker label="이름 색" value={p.color} onChange={(c) => editor.apply((d) => C.updateIdentity(d, id, { color: c }))} />
-        <span>말풍선 색</span>
-        <ColorPicker label="말풍선 색(말풍선형)" value={p.style?.bubbleColor ?? null} onChange={(c) => setStyle({ bubbleColor: c ?? undefined })} />
-      </div>
+      <p className="small muted">이름 색·말풍선 색·위치·인장 모양 같은 보이는 모양은 꾸미기 → '인물별'에서 바꿉니다. 여기서는 이름·소개·인장 이미지 같은 자료를 고칩니다.</p>
 
       <div className="row-actions">
         <button type="button" className="ui-btn ui-btn-small" disabled={ro} aria-pressed={p.hidden} onClick={() => editor.apply((d) => C.updateIdentity(d, id, { hidden: !p.hidden }))}>

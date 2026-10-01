@@ -134,14 +134,26 @@ export function BandModule({
 
   const applyToAll = useCallback(
     async (view: ViewSettings) => {
+      // 되돌리기용: 바꾸기 전 각 글의 꾸밈 값
+      const before: { id: string; view: ViewSettings }[] = [];
       for (const d of docs) {
         if (sessionDoc && d.id === sessionDoc.id) continue;
         const cur = await db().documents.get(d.id);
         if (!cur) continue;
         const fresh = normalizeDocument(cur);
+        before.push({ id: d.id, view: structuredClone(fresh.view) });
         await saveDocument({ ...fresh, view: { ...fresh.view, style: structuredClone(view.style), skinFamily: view.skinFamily, width: view.width, show: { ...view.show }, missingImages: view.missingImages } }, fresh.revision);
       }
       await reload();
+      return async () => {
+        for (const b of before) {
+          const cur = await db().documents.get(b.id);
+          if (!cur) continue;
+          const fresh = normalizeDocument(cur);
+          await saveDocument({ ...fresh, view: b.view }, fresh.revision);
+        }
+        await reload();
+      };
     },
     [docs, sessionDoc, reload],
   );

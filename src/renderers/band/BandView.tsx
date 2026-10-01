@@ -337,6 +337,14 @@ function Post({ ctx, entry }: { ctx: Ctx; entry: Entry }) {
   );
 }
 
+/** 인물별 말풍선 색(말풍선형에서만 보인다). 비어 있으면 문서 설정을 따른다 */
+function idnBubbleStyle(idn: Identity | null): CSSProperties | undefined {
+  const v: Record<string, string> = {};
+  if (idn?.style?.bubbleColor) v["--al-bubble"] = idn.style.bubbleColor;
+  if (idn?.style?.bubbleTextColor) v["--al-bubble-text"] = idn.style.bubbleTextColor;
+  return Object.keys(v).length ? (v as CSSProperties) : undefined;
+}
+
 function CommentNode({ ctx, entry, depth, prevAuthor }: { ctx: Ctx; entry: Entry; depth: number; prevAuthor: string | null }) {
   const { doc, mode, edit } = ctx;
   const idn = identityOf(doc, entry);
@@ -349,14 +357,15 @@ function CommentNode({ ctx, entry, depth, prevAuthor }: { ctx: Ctx; entry: Entry
   const showAvatar = repeat !== "hidden" && !grouped;
   const replies = kids.length;
   const known = reactionKnown(entry.reactions);
-  const bubble = idn?.style?.bubbleColor ? ({ ["--al-bubble" as string]: idn.style.bubbleColor } as CSSProperties) : undefined;
+  const bubble = idnBubbleStyle(idn);
+  const right = st.commentSkin === "bubble" && idn?.style?.side === "right";
   return (
     <div className={`al-thread depth-${Math.min(depth, 3)}${grouped ? " is-grouped" : ""}`}>
       <div
         {...entryWrapperProps(
           entry,
           ctx,
-          `al-entry al-comment${hidden ? " is-hidden" : ""}${entry.kind === "unclassified" ? " is-unclassified" : ""}${mode === "edit" && entry.parentUnknown ? " is-parent-unknown" : ""}`,
+          `al-entry al-comment${right ? " is-right" : ""}${hidden ? " is-hidden" : ""}${entry.kind === "unclassified" ? " is-unclassified" : ""}${mode === "edit" && entry.parentUnknown ? " is-parent-unknown" : ""}`,
         )}
       >
         {hidden && mode !== "edit" ? (

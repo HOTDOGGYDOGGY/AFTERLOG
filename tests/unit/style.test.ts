@@ -61,6 +61,24 @@ describe("스타일 해석", () => {
     expect(d.identities[garam.id].avatarAssetId).toBe(base.identities[garam.id].avatarAssetId);
   });
 
+  it("인물별 말풍선 바탕·글자색·오른쪽은 말풍선형에서 그 인물 댓글에만, 자료는 그대로", () => {
+    const base = styled((v) => void (v.style!.commentSkin = "bubble"));
+    const garam = Object.values(base.identities).find((i) => i.originalName === "가람")!;
+    const d = C.updateIdentity(base, garam.id, { color: "#d9480f", style: { bubbleColor: "#1971c2", bubbleTextColor: "#ffffff", side: "right" } });
+    const html = renderDocumentHtml(d, urls, "light");
+    expect(html).toContain("--al-bubble:#1971c2");
+    expect(html).toContain("--al-bubble-text:#ffffff");
+    const garamComments = Object.values(d.entries).filter((e) => e.kind !== "post" && e.authorId === garam.id).length;
+    expect(garamComments).toBeGreaterThan(0);
+    expect(html.match(/al-comment is-right/g)?.length).toBe(garamComments);
+    // 본문·순서·답글 관계·작성자는 그대로(이름색·꾸밈만 바뀜)
+    expect(JSON.stringify({ e: d.entries, c: d.children })).toBe(JSON.stringify({ e: base.entries, c: base.children }));
+    expect(d.identities[garam.id].originalName).toBe("가람");
+    // 말풍선형이 아니면 위치는 바뀌지 않는다
+    const band = C.updateView(d, (v) => void (v.style!.commentSkin = "band"));
+    expect(renderDocumentHtml(band, urls, "light")).not.toContain("is-right");
+  });
+
   it("U13 댓글 스킨을 바꿔도 본문·순서·부모·반응 값이 같다", () => {
     const before = syntheticDoc(assetMap);
     for (const skin of ["linear", "bubble", "card", "reading", "band"] as const) {

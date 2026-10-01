@@ -318,6 +318,7 @@
   padding: 8px 12px;
   border-radius: var(--al-bubble-radius, 14px);
   background: var(--al-bubble);
+  color: var(--al-bubble-text, inherit);
 }
 .al-skin-bubble.al-tail-small .al-comment-body,
 .al-skin-bubble.al-tail-default .al-comment-body {
@@ -339,6 +340,38 @@
   left: -9px;
   border-top-width: 12px;
   border-left-width: 10px;
+}
+
+/* 인물별 '오른쪽'(말풍선형만): 인장·이름·말풍선을 오른쪽으로. 순서·들여쓰기·답글 관계는 그대로 */
+.al-skin-bubble .al-comment.is-right {
+  flex-direction: row-reverse;
+  padding: 8px 22px 8px 40px;
+}
+.al-skin-bubble .al-comment.is-right .al-comment-main {
+  text-align: right;
+}
+.al-skin-bubble .al-comment.is-right .al-name-row,
+.al-skin-bubble .al-comment.is-right .al-sub {
+  justify-content: flex-end;
+}
+.al-skin-bubble .al-comment.is-right .al-comment-body {
+  text-align: left;
+}
+.al-skin-bubble.al-tail-small .al-comment.is-right .al-comment-body,
+.al-skin-bubble.al-tail-default .al-comment.is-right .al-comment-body {
+  border-top-left-radius: var(--al-bubble-radius, 14px);
+  border-top-right-radius: 3px;
+}
+.al-skin-bubble.al-tail-small .al-comment.is-right .al-comment-body::before,
+.al-skin-bubble.al-tail-default .al-comment.is-right .al-comment-body::before {
+  left: auto;
+  right: -6px;
+  border-left: 0;
+  border-right: 7px solid transparent;
+}
+.al-skin-bubble.al-tail-default .al-comment.is-right .al-comment-body::before {
+  right: -9px;
+  border-right-width: 10px;
 }
 
 /* ---------- 읽기형 ---------- */

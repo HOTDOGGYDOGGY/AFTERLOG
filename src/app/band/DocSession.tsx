@@ -61,7 +61,7 @@ export function DocSession({
   onImported(projectId: string, docs: DocumentData[]): void;
   onOpenPerson(docId: string, identityId: string): void;
   registerFlush(fn: () => Promise<void>): () => void;
-  onApplyToAll(view: ViewSettings): Promise<void>;
+  onApplyToAll(view: ViewSettings): Promise<(() => Promise<void>) | void>;
   onSaveProjectDefault(view: ViewSettings): Promise<void>;
 }) {
   const editor = useDocEditor(initial);
@@ -252,9 +252,10 @@ export function DocSession({
               otherDocs={docs.length - 1}
               onApplyToAll={async (v) => {
                 await editor.flush();
-                await onApplyToAll(v);
+                return onApplyToAll(v);
               }}
               onSaveProjectDefault={onSaveProjectDefault}
+              assetUrl={assets.url}
             />
           ) : null}
         </div>

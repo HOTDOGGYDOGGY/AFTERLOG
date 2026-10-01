@@ -113,6 +113,10 @@ export interface IdentityStyle {
   avatarShape?: AvatarShape;
   /** 말풍선형에서의 말풍선 색 */
   bubbleColor?: string;
+  /** 말풍선형에서의 말풍선 글자색 */
+  bubbleTextColor?: string;
+  /** 말풍선형에서 이 인물의 댓글을 오른쪽에(대화처럼 보기). 순서·답글 관계·작성자는 그대로 */
+  side?: "left" | "right";
 }
 
 export interface Asset {
