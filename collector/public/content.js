@@ -5,6 +5,7 @@
    - 누르면 확장의 수집 관리 창이 열려 작업을 만들고 바로 시작한다. 이 스크립트는 밴드에 글·댓글·표정을 쓰지 않고, 글 내용을 읽지 않는다.
    - '직접 열며 수집'을 켜면 사용자가 여는 화면(프로필·스토리·팝업·사진 탭)이 바뀔 때마다 알려 수집 관리 창이 그 화면을 읽게 한다.
      바뀜 판단에는 화면 구조 표시(열린 영역·항목 수·이름)만 쓰고 그 값은 어디에도 보내지 않는다. 누르거나 쓰지 않는다.
+   - '자료 구조 시험': 이 탭에서만 netprobe.js를 켜고(새로 고침), 밴드가 받아 오는 응답의 모양(값 없음)을 모아 파일로 내려받는다.
    - 막대 앞에 지금 화면의 범위(이 글·이 인물·밴드 전체 등)를, 수집 중에는 관리 창이 보내 준 진행 수(글·댓글·이미지)를 보여 준다.
    - 밴드는 주소만 바뀌는 화면 전환을 하고, 프로필은 주소 변화 없이 팝업으로 열리기도 한다(실제 저장 표본).
      그래서 주소와 함께 '열린 프로필 팝업이 있는지'(화면 구조 표시만, 내용은 읽지 않음)를 주기적으로 확인해 버튼을 바꾼다. */
@@ -58,6 +59,11 @@
     memberComment: "인물 댓글 목록",
     search: "검색 결과",
   };
+
+  // 모든 화면 끝에 '자료 구조 시험'(밴드가 받아 오는 자료의 모양만 기록)
+  Object.keys(ACTIONS).forEach(function (k) {
+    ACTIONS[k].push(["probe", "자료 구조 시험"]);
+  });
 
   var host = document.createElement("div");
   host.id = "afterlog-collector-bar";
@@ -140,6 +146,131 @@
       acts.appendChild(b);
     });
     if (following) setFollow(true, "");
+    probeMark(p.kind);
+    probeUi();
+  }
+
+  // ---- 자료 구조 시험 ----
+  // 표식을 켜고 새로 고치면 netprobe.js(MAIN world)가 밴드가 받아 오는 응답의 모양만 이 탭 sessionStorage에 모은다.
+  // 여기서는 켜고 끄기, 진행 수 표시, 끝낼 때 화면 구조 수(개수만)를 붙여 파일로 내려받기만 한다.
+  var PROBE = "afterlog.netprobe";
+  var PROBE_DATA = "afterlog.netprobe.data";
+  var PROBE_PAGES = "afterlog.netprobe.pages";
+  function ss(k, v) {
+    try {
+      if (v === undefined) return sessionStorage.getItem(k);
+      if (v === null) sessionStorage.removeItem(k);
+      else sessionStorage.setItem(k, v);
+    } catch (e) {
+      return null;
+    }
+    return null;
+  }
+  function probeOn() {
+    return ss(PROBE) === "1";
+  }
+  function probeData() {
+    try {
+      return JSON.parse(ss(PROBE_DATA) || "null");
+    } catch (e) {
+      return null;
+    }
+  }
+  function probeMark(kind) {
+    if (!probeOn()) return;
+    var list = [];
+    try {
+      list = JSON.parse(ss(PROBE_PAGES) || "[]");
+    } catch (e) {
+      list = [];
+    }
+    if (list.indexOf(kind) < 0) {
+      list.push(kind);
+      ss(PROBE_PAGES, JSON.stringify(list));
+    }
+  }
+  function probeUi() {
+    var b = acts.querySelector('[data-act="probe"]');
+    var on = probeOn();
+    if (b) {
+      b.textContent = on ? "시험 끝·저장" : "자료 구조 시험";
+      b.className = on ? "primary" : "";
+    }
+    if (on) {
+      var d = probeData();
+      progEl.textContent = "시험 중 · 응답 " + (d ? d.responses : 0) + "개 · 주소 " + (d ? d.order.length : 0) + "종";
+      progEl.className = "prog is-running";
+      progEl.hidden = false;
+    } else if (/^시험 중/.test(progEl.textContent)) progEl.hidden = true;
+  }
+  /** 화면 구조 수(개수만): 자료 속 개수와 화면에 보인 개수를 맞춰 보기 위해 */
+  function domCounts() {
+    var vis = function (el) {
+      return el.getClientRects().length > 0;
+    };
+    var count = function (sel, onlyVisible) {
+      var els = document.querySelectorAll(sel);
+      var n = 0;
+      for (var i = 0; i < els.length; i++) if (!onlyVisible || vis(els[i])) n++;
+      return n;
+    };
+    return {
+      postCards: count(".cPostCard", true),
+      postListItems: count("[data-viewname='DPostListItemView']", true),
+      comments: count(".cComment", false),
+      commentsVisible: count(".cComment", true),
+      replies: count(".sReplyList .cComment", false),
+      postImages: count(".cPostCard img", true),
+      storyItems: count("[data-viewname='DProfileStoryListItemView']", true),
+      memberPhotos: count("[data-viewname='DBandMemberPhotoListItemView']", true),
+    };
+  }
+  function probeStart() {
+    ss(PROBE_DATA, null);
+    ss(PROBE_PAGES, null);
+    ss(PROBE, "1");
+    flash("자료 구조 시험을 켰습니다. 새로 고친 뒤 평소처럼 보세요: 글 목록 스크롤 → 글 열기 → 이전 댓글·답글 끝까지 → 이미지 크게 보기 → '시험 끝·저장'", 12000);
+    setTimeout(function () {
+      location.reload();
+    }, 1500);
+  }
+  function probeFinish() {
+    var d = probeData() || { schema: "afterlog.netprobe/1", responses: 0, endpoints: {}, order: [] };
+    var pages = [];
+    try {
+      pages = JSON.parse(ss(PROBE_PAGES) || "[]");
+    } catch (e) {
+      pages = [];
+    }
+    var file = {
+      schema: d.schema || "afterlog.netprobe/1",
+      note: "밴드 페이지가 받아 온 응답의 모양만 기록(값 없음): 주소 경로(숫자는 :n)·매개변수 이름·열쇠 이름·값 종류·배열 길이. 글 내용·이름·주소 값·토큰은 넣지 않음.",
+      startedAt: d.startedAt || null,
+      finishedAt: new Date().toISOString(),
+      userAgent: navigator.userAgent.replace(/\s*\(.*?\)\s*/g, " "),
+      pages: pages,
+      domAtFinish: domCounts(),
+      responses: d.responses || 0,
+      skippedLarge: d.skipped || 0,
+      endpoints: (d.order || []).map(function (k) {
+        return d.endpoints[k];
+      }),
+    };
+    var blob = new Blob([JSON.stringify(file, null, 1)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "AFTERLOG_자료구조시험.json";
+    root.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () {
+      URL.revokeObjectURL(a.href);
+    }, 30000);
+    ss(PROBE, null);
+    ss(PROBE_DATA, null);
+    ss(PROBE_PAGES, null);
+    probeUi();
+    flash("시험 파일(AFTERLOG_자료구조시험.json)을 받았습니다. 응답 " + file.responses + "개 · 주소 " + file.endpoints.length + "종. 이 파일을 보내 주세요.", 12000);
   }
 
   // ---- 직접 열며 수집 ----
@@ -224,6 +355,7 @@
     if (!act || !e.isTrusted) return;
     if (act === "hide") return setHidden(true);
     if (act === "show") return setHidden(false);
+    if (act === "probe") return probeOn() ? probeFinish() : probeStart();
     if (act === "follow" && following) {
       try {
         chrome.runtime.sendMessage({ type: "afterlog-follow-stop" }, function () {
@@ -254,7 +386,10 @@
   setHidden(hidden);
   refresh();
   document.documentElement.appendChild(host);
-  setInterval(refresh, 800);
+  setInterval(function () {
+    refresh();
+    if (probeOn()) probeUi();
+  }, 800);
   // 페이지가 새로 열려도(주소 이동) 직접 열며 수집 중이면 이어서
   try {
     chrome.runtime.sendMessage({ type: "afterlog-follow-query" }, function (r) {

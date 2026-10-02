@@ -270,6 +270,36 @@ test("밴드 화면 저장 막대: 글 화면·목록 화면에서 바로 저장
   await band.close();
 });
 
+test("자료 구조 시험: 켠 탭에서만 밴드가 받아 오는 응답의 모양을 모아 파일로, 이름·글·토큰 값은 남기지 않음", async () => {
+  const band = await ctx.newPage();
+  await band.goto(`${BAND}/post/3`);
+  await expect(band.locator(".cPostCard")).toBeVisible();
+  const bar = band.locator("#afterlog-collector-bar");
+  await bar.getByRole("button", { name: "자료 구조 시험" }).click();
+  // 켜면 새로 고친 뒤부터 기록
+  await expect(bar.getByRole("button", { name: "시험 끝·저장" })).toBeVisible({ timeout: 10_000 });
+  await expect(band.locator(".cPostCard")).toBeVisible();
+  await expect(bar.locator(".prog")).toContainText(/시험 중 · 응답 [2-9]\d*개/, { timeout: 10_000 });
+  const dl = band.waitForEvent("download");
+  await bar.getByRole("button", { name: "시험 끝·저장" }).click();
+  const file = resolve(OUT, "netprobe.json");
+  await (await dl).saveAs(file);
+  const text = readFileSync(file, "utf8");
+  const j = JSON.parse(text);
+  expect(j.schema).toBe("afterlog.netprobe/1");
+  const ep = j.endpoints.find((e: { path: string }) => e.path === "/api/v2.0.0/get_comments");
+  expect(ep.query).toEqual(["band_no", "post_no", "secret_key"]);
+  expect(ep.via).toEqual({ fetch: 1 });
+  expect(ep.shape.k.result_data.k.items.max).toBe(3);
+  expect(j.endpoints.some((e: { path: string; via: Record<string, number> }) => e.path === "/api/v1.3.0/get_post" && e.via.xhr === 1)).toBe(true);
+  expect(j.domAtFinish.postCards).toBeGreaterThan(0);
+  for (const secret of ["SECRETVALUE123", "비밀댓글내용", "비밀이름", "비밀본문", "abcdefabcdefabcdef1234", "12345679"]) expect(text).not.toContain(secret);
+  // 끝낸 뒤에는 꺼진다(다시 고쳐도 기록하지 않음)
+  await expect(bar.getByRole("button", { name: "자료 구조 시험" })).toBeVisible();
+  expect(await band.evaluate(() => sessionStorage.getItem("afterlog.netprobe"))).toBeNull();
+  await band.close();
+});
+
 test("인물 선택(C): 인물 댓글 목록에서 '연결된 원글까지' → 항목을 눌러 원글 확인, 같은 원글은 한 번만", async () => {
   const hits0 = await (await fetch("http://localhost:4588/stats")).json();
   const band = await ctx.newPage();

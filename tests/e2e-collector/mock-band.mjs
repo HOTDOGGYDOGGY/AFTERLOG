@@ -59,6 +59,9 @@ const band = http.createServer((req, res) => {
       page(
         `<div id="app"></div><template id="t">${postCard(n)}</template>`,
         `setTimeout(()=>{document.getElementById('app').append(document.getElementById('t').content.cloneNode(true))},600);
+        // 밴드처럼 자료를 따로 받아 온다(자료 구조 시험용): fetch와 XHR 하나씩
+        fetch('/api/v2.0.0/get_comments?band_no=${BAND}&post_no='+${n}+'&secret_key=SECRETVALUE123').then(r=>r.json()).catch(()=>{});
+        {const x=new XMLHttpRequest();x.open('GET','/api/v1.3.0/get_post?post_no=${n}');x.send();}
         window.__muted=0;
         document.addEventListener('click',(e)=>{
           if(e.target.closest('._btnMuteMember')){e.preventDefault();window.__muted++;document.body.dataset.muted='1';return;}
@@ -190,6 +193,30 @@ const band = http.createServer((req, res) => {
           box.querySelector('.postViewer').append(document.getElementById('post'+n).content.cloneNode(true));
           box.querySelector('.btnLyClose').addEventListener('click',()=>box.remove());document.body.append(box)},300)});`;
     return send(200, page(`${head}<div data-viewname="DBandMemberCommentListView">${items}</div>${cards}`, script));
+  }
+  // 밴드 내부 자료처럼 생긴 JSON(자료 구조 시험용). 값에 이름·글·토큰이 있어도 시험 파일에는 남지 않아야 한다
+  if (url.pathname === "/api/v2.0.0/get_comments") {
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    return res.end(
+      JSON.stringify({
+        result_code: 1,
+        result_data: {
+          items: [1, 2, 3].map((i) => ({
+            comment_key: { comment_id: 9000 + i, post_no: Number(url.searchParams.get("post_no")) },
+            author: { name: "비밀이름" + i, user_no: 12345678 + i, profile_image_url: "https://coresos-phinf.pstatic.net/a/b" + i + ".jpg?type=s75" },
+            body: "비밀댓글내용" + i,
+            created_at: 1772000000000 + i,
+            photo: i === 2 ? { url: "https://coresos-phinf.pstatic.net/p/" + i + ".jpg", width: 640 } : null,
+            comment_count: i === 1 ? 1 : 0,
+          })),
+          paging: { next_params: { after: "abcdefabcdefabcdef1234", limit: 20 } },
+        },
+      }),
+    );
+  }
+  if (url.pathname === "/api/v1.3.0/get_post") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ result_code: 1, result_data: { post: { content: "비밀본문", comment_count: 3, photos: [] } } }));
   }
   if (url.pathname === "/stats") {
     res.writeHead(200, { "content-type": "application/json" });
