@@ -56,9 +56,14 @@
     return typeof v;
   }
   // 열쇠 이름이 값처럼 생겼으면(인물 번호를 열쇠로 쓴 표 등) 가린다
+  // 식별자처럼 보이는가: 숫자가 섞인 긴 문자열(16진·base64 등). 밴드 함수·열쇠 이름(소문자 snake_case)은 가리지 않는다
+  function looksId(x) {
+    if (/^[a-z][a-z_]*$/.test(x)) return false;
+    return /\d/.test(x) && (/^[0-9a-f]{12,}$/i.test(x) || /^[A-Za-z0-9_-]{20,}={0,2}$/.test(x));
+  }
   function safeKey(k) {
     if (/^\d+$/.test(k)) return ":n";
-    if (/^[0-9a-f]{12,}$/i.test(k) || /^[A-Za-z0-9_-]{24,}$/.test(k)) return ":id";
+    if (looksId(k)) return ":id";
     if (/[^\x20-\x7e]/.test(k)) return ":text";
     return k.length > 60 ? k.slice(0, 60) + "…" : k;
   }
@@ -131,7 +136,7 @@
       .split("/")
       .map(function (seg) {
         if (/^\d{3,}$/.test(seg)) return ":n";
-        if (/^[0-9a-f]{12,}$/i.test(seg) || /^[A-Za-z0-9_-]{24,}$/.test(seg)) return ":id";
+        if (looksId(seg)) return ":id";
         if (/%[0-9a-f]{2}/i.test(seg) || /[^\x20-\x7e]/.test(seg)) return ":text";
         return seg;
       })

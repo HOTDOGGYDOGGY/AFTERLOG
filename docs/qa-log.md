@@ -7,6 +7,16 @@
 
 
 
+## 2026-10-02 · 수집 확장 0.4.4 (자료 구조 시험 결과 반영)
+근거: 사용자가 0.4.3으로 만든 자료 구조 시험 파일 1개(응답 135개, 값 없음).
+- 확인한 사실(구조만):
+  - 답글: 댓글 자료에 최근 답글(latest_comment, 1~5개)이 들어 있고, 각 답글에 origin_comment_id(부모 댓글)와 comment_id. 더 많은 답글은 같은 get_comments로 따로 받음(항목에 origin_comment_id). 댓글마다 comment_count(답글 수).
+  - 프로필 사진 이력: get_profile_photos → 사진마다 profile_photo_id, 원본 photo.url(크기 매개변수 없음)·가로·세로, 올린 시각, 표정 수·댓글 수. total_count.
+  - 스토리: get_profile_stories → profile_story_id, content(글·링크 미리보기 묶음), 작성·수정 시각, 표정 수·댓글 수, web_url. total_count.
+  - 글 사진: get_post의 attachment.photo에 photo_url(원본)·photo_thumbnail(type=)·width·height·photo_no.
+  - 표정: get_emotions(content_key).
+- 고침: 시험 파일이 밴드의 긴 함수·매개변수 이름(소문자 snake_case)을 식별자로 보고 :id로 가려 서로 다른 주소가 뭉쳤던 문제. 숫자가 섞인 긴 문자열만 가림.
+
 ## 2026-10-02 · 수집 확장 0.4.3 (자료 구조 시험 · 실제 밴드 HAR 확인)
 근거: 사용자가 보낸 실제 밴드 HAR 1개(313건). 원본은 작업 공간에만, 저장소에 넣지 않음.
 - 확인한 사실(구조만): 밴드 웹은 글·댓글·사진·인물을 api-kr.band.us의 JSON으로 받아 그린다.

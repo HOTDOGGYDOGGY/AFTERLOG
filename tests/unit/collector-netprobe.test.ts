@@ -54,6 +54,13 @@ describe("자료 구조 시험", () => {
     expect(api.endpointOf("https://band.us/band/12345678/post/987654?keyword=비밀")).toEqual({ host: "band.us", path: "/band/:n/post/:n", query: ["keyword"] });
     expect(api.endpointOf("https://api-kr.band.us/v2.0.0/x/a1b2c3d4e5f6a1b2c3d4e5f6").path).toBe("/v2.0.0/x/:id");
     expect(api.endpointOf("https://my-secret-site.example/p").host).toBe("other");
+    // 밴드의 긴 함수·매개변수 이름은 그대로(실제 시험 파일에서 :id로 뭉쳤던 문제)
+    expect(api.endpointOf("https://api-kr.band.us/v2.0.0/search_for_posts_with_author?is_last_paging_value_for_included=1").toString()).toBeTruthy();
+    expect(api.endpointOf("https://api-kr.band.us/v2.0.0/search_for_posts_with_author?is_last_paging_value_for_included=1")).toEqual({
+      host: "api-kr.band.us",
+      path: "/v2.0.0/search_for_posts_with_author",
+      query: ["is_last_paging_value_for_included"],
+    });
     const store = { responses: 0, endpoints: {} as Record<string, Record<string, any>>, order: [] as string[] };
     api.addResponse(store, { method: "GET", url: "https://band.us/x", status: 200, ctype: "text/html", text: "<html>비밀</html>", via: "fetch" });
     const e = store.endpoints[store.order[0]] as Record<string, any>;
